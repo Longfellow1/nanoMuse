@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:nanomuse:goal-eval:contract:v1",
+  "title": "GoalEval v1 contract",
+  "description": "Scalar predicates only. The library additionally rejects duplicate criterion IDs, requires an outcome criterion and validates finite numbers. Source identity is host-owned, never an agent assertion.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["goal_id", "revision", "criteria"],
+  "properties": {
+    "goal_id": {"type": "string", "pattern": "\\S"},
+    "revision": {"type": "integer", "minimum": 1},
+    "criteria": {
+      "type": "array", "minItems": 1,
+      "items": {"$ref": "#/$defs/criterion"},
+      "contains": {"anyOf": [
+        {"required": ["invariant"], "properties": {"invariant": {"const": false}}},
+        {"not": {"required": ["invariant"]}}
+      ]}
+    }
+  },
+  "$defs": {
+    "criterion": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "subject", "metric", "op", "target", "unit", "collectors"],
+      "properties": {
+        "id": {"type": "string", "pattern": "\\S"},
+        "subject": {"type": "string", "pattern": "\\S"},
+        "metric": {"type": "string", "pattern": "\\S"},
+        "op": {"enum": ["eq", "gte"]},
+        "target": {"type": ["string", "boolean", "number"]},
+        "unit": {"type": "string", "pattern": "\\S"},
+        "collectors": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "\\S"}},
+        "max_age": {"type": "integer", "minimum": 1, "default": 3600},
+        "invariant": {"type": "boolean", "default": false}
+      },
+      "allOf": [{"if": {"properties": {"op": {"const": "gte"}}}, "then": {"properties": {"target": {"type": "number"}}}}]
+    }
+  }
+}

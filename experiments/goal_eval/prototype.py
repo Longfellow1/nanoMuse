@@ -1,0 +1,41 @@
+"""Compatibility imports; the v1 implementation lives in nanoMuse. No runtime hooks."""
+
+from nanomuse.goals.evaluation import (
+    EVALUATOR_VERSION,
+    Contract,
+    Criterion,
+    Decision,
+    Evidence,
+    Ledger,
+    Run,
+    Scalar,
+    Verdict,
+    canonical,
+    collect_file,
+    contract_from_dict,
+    decide,
+    evaluate,
+    fingerprint,
+    observation,
+    validate_result,
+)
+
+__all__ = [
+    "EVALUATOR_VERSION",
+    "Contract",
+    "Criterion",
+    "Decision",
+    "Evidence",
+    "Ledger",
+    "Run",
+    "Scalar",
+    "Verdict",
+    "canonical",
+    "collect_file",
+    "contract_from_dict",
+    "decide",
+    "evaluate",
+    "fingerprint",
+    "observation",
+    "validate_result",
+]
