@@ -129,6 +129,9 @@
     <string name="nm_routine_paused">Mati</string>
     <!-- The chat row a routine sent: its label and the clock time it fired -->
     <string name="nm_routine_wake_caption">Rutin · %1$s · %2$s</string>
+    <!-- One scheduled task, several times a day (GH#557) -->
+    <string name="nm_scheduled_task_add_time">Tambah masa lain</string>
+    <string name="nm_scheduled_task_runs_scheduled_for">Dijadualkan untuk %1$s</string>
 
     <!-- Ideas tab -->
     <string name="nm_ideas_title">Idea</string>
@@ -320,6 +323,9 @@
     <string name="nm_avatar_menu_model">Model imej</string>
     <string name="nm_avatar_menu_regenerate_moods">Lukis semula ekspresi</string>
     <string name="nm_avatar_menu_reset">Kembali ke wajah terbina dalam</string>
+    <string name="nm_avatar_menu_export">Simpan ke galeri</string>
+    <string name="nm_avatar_export_done">Disimpan ke galeri di bawah nanoMuse/avatar: imej %1$d, klip %2$d</string>
+    <string name="nm_avatar_export_failed">Tiada apa yang dapat disimpan ke galeri</string>
     <string name="nm_avatar_mood_idle">Berehat</string>
     <string name="nm_avatar_mood_working">Bekerja</string>
     <string name="nm_avatar_mood_waiting">Menunggu anda</string>
@@ -331,6 +337,16 @@
     <string name="nm_avatar_retry">Cuba lagi</string>
     <string name="nm_avatar_describe_title">Gambarkan wajah baharu</string>
     <string name="nm_avatar_describe_body">Satu ayat sudah memadai: apa benda itu, apa yang dipakainya, bagaimana rasanya. Pilih gaya, dan model imej anda melukis empat untuk dipilih.</string>
+    <string name="nm_avatar_preset_moss_name">Utusan Lumut</string>
+    <string name="nm_avatar_preset_moss_description">utusan kecil diselaputi lumut dengan telinga daun dan beg kanvas tanpa tanda</string>
+    <string name="nm_avatar_preset_tide_name">Pereka Pasang Surut</string>
+    <string name="nm_avatar_preset_tide_description">axolotl pereka berwarna buih laut dengan insang karang dan uncang alat ringkas</string>
+    <string name="nm_avatar_preset_dusk_name">Rama-rama Senja</string>
+    <string name="nm_avatar_preset_dusk_description">rama-rama indigo yang tenang dengan tompok pic pada sayap, kolar krim dan cermin mata bulat</string>
+    <string name="nm_avatar_preset_copper_name">Buah Oak Tembaga</string>
+    <string name="nm_avatar_preset_copper_description">automaton tembaga kecil berbentuk buah oak dengan panel hijau sage dan skarf biru suram</string>
+    <string name="nm_avatar_preset_a11y">Pilihan %1$d: %2$s, %3$s</string>
+    <string name="nm_avatar_preset_ai">Inspirasi dijana AI</string>
     <string name="nm_avatar_default_description">Anak naga gempal berwarna kuning pucat dengan tanduk oren kecil dan sayap kecil yang terlipat</string>
     <string name="nm_avatar_style_flat">Rata</string>
     <string name="nm_avatar_style_clay">Tanah liat 3D</string>
@@ -349,7 +365,7 @@
     <string name="nm_avatar_pick_body">Anda boleh melukis empat lagi bila-bila masa; yang lama disimpan sehingga anda berbuat demikian.</string>
     <string name="nm_avatar_use_this">Guna yang ini</string>
     <string name="nm_avatar_use_this_hint">Ekspresi (bekerja, menunggu, selesai, alamak) dilukis daripadanya selepas ini, di latar belakang.</string>
-    <string name="nm_avatar_footer">Gambar disimpan di telefon ini di bawah minis-global/nanomuse/avatar. Setiap wajah memerlukan lima imej daripada penyedia anda: satu yang anda pilih dan empat ekspresi.</string>
+    <string name="nm_avatar_footer">Gambar berada dalam storan milik aplikasi pada telefon ini, yang tidak dapat dibuka oleh pengurus fail. “Simpan ke galeri” dalam menu menyalin wajah, ekspresinya dan klipnya ke Pictures dan Movies di bawah nanoMuse/avatar. Setiap wajah memerlukan lima imej daripada penyedia anda: satu yang anda pilih dan empat ekspresi.</string>
     <string name="nm_own_clip_title">Klip anda sendiri</string>
     <string name="nm_own_clip_body">Video pendek milik anda dimainkan sebagai wajah semasa rehat, dan mood lain turut menggunakannya. MP4 atau MOV dengan video H.264, paling lama 15 saat dan 30 MB; dimainkan tanpa bunyi, berulang.</string>
     <string name="nm_own_clip_on">Klip anda aktif dan dimainkan untuk setiap mood; di tempat imej pegun ditunjukkan, gambar yang dilukis kekal digunakan. “Wajah lalai” membuangnya.</string>
@@ -612,6 +628,12 @@
     <string name="nm_risk_title_device">Benarkan “%1$s” mengendalikan telefon ini?</string>
     <string name="nm_risk_desc_device">“%1$s”, peranti lain pada akaun anda, mahu %2$s di telefon ini. Butirannya ditunjukkan di bawah. “Sentiasa” membenarkan peranti itu melakukan perkara sebegini di sini tanpa bertanya; tarik balik di bawah Kebenaran.</string>
     <string name="nm_risk_preview_device">Apa yang diminta peranti</string>
+    <string name="nm_risk_title_scheduled">Benarkan %1$s melakukan langkah ini pada “%2$s”?</string>
+    <string name="nm_risk_desc_scheduled">Tugas berjadual “%1$s” sedang berjalan pada “%2$s” dan menunggu jawapan anda. Langkah ini berjalan di sana, bukan pada telefon ini.</string>
+    <string name="nm_risk_desc_scheduled_app">Tugas berjadual “%1$s” sedang berjalan pada “%2$s” dan mahu bertindak dalam %3$s. Ia menunggu jawapan anda; langkah ini berjalan di sana, bukan pada telefon ini.</string>
+    <string name="nm_risk_preview_scheduled">Langkah pada komputer</string>
+    <string name="nm_risk_allow_task">Sentiasa dalam tugas ini</string>
+    <string name="nm_risk_task_remembered_toast">Disimpan pada “%1$s”: tugas ini tidak bertanya lagi di sana. Tarik balik di Tetapan → Kebenaran pada komputer itu.</string>
     <string name="nm_risk_preview_show_all">Tunjukkan semua (%1$d baris)</string>
     <string name="nm_risk_preview_show_less">Tunjukkan kurang</string>
     <string name="nm_risk_class_remote">Kawalan jauh</string>
@@ -820,16 +842,21 @@
     <string name="nm_cloud_ev_contribute_default">Kawalan data: hidup untuk akaun baharu</string>
     <string name="nm_data_title">Kawalan data</string>
     <string name="nm_data_improve">Bantu perbaiki model AI nanoMuse</string>
-    <string name="nm_data_why">Semasa ini dihidupkan, teks sembang anda dengan model nanoMuse Cloud (apa yang anda tulis, apa yang dijawabnya dan alat yang dipilihnya untuk dipanggil) disimpan di relay untuk melatih model terbuka komuniti sendiri. Bukan memori atau SOUL anda (gesaan sistem), bukan apa yang dikembalikan alat, bukan gambar, dan tidak pernah bersebelahan dengan identiti anda. Kunci API anda sendiri tidak pernah melalui relay.</string>
+    <string name="nm_data_why">Semasa ini dihidupkan, teks sembang tersebut (apa yang anda tulis, apa yang dijawab model dan alat yang dipilihnya untuk dipanggil) turut masuk ke set latihan model terbuka komuniti sendiri: tanpa memori atau SOUL anda (gesaan sistem), tanpa apa yang dikembalikan alat, tanpa gambar dan tanpa identiti anda. Apabila dimatikan, tiada lagi yang masuk; rekod itu sendiri kekal sehingga anda memadamnya. Giliran dengan kunci anda sendiri ada dalam rekod, tidak pernah dalam set latihan.</string>
+    <string name="nm_data_record_why">nanoMuse Cloud menyimpan sepenuhnya setiap giliran sembang anda dengan model-modelnya sebagai rekod akaun anda: apa yang dihantar kepada model, apa yang dijawabnya, alat dan apa yang dikembalikannya, gambar sebagai fail. Mulai aplikasi 1.0.7, giliran yang dijawab dengan kunci anda sendiri turut masuk. Ini data anda: hanya peranti anda dan orang yang mengendalikan relay boleh membacanya.</string>
+    <string name="nm_data_record_held">Rekod menyimpan %1$d giliran akaun ini (%2$d dengan kunci anda sendiri), dengan %3$d gambar.</string>
+    <string name="nm_data_record_empty">Rekod belum menyimpan apa-apa daripada akaun ini.</string>
+    <string name="nm_data_record_keep_days">Relay ini menyimpan satu giliran selama %1$d hari.</string>
+    <string name="nm_data_record_keep_forever">Kekal sehingga anda memadamnya.</string>
     <string name="nm_data_default_on">Akaun baharu bermula dengan ia dihidupkan.</string>
     <string name="nm_data_default_off">Akaun baharu bermula dengan ia dimatikan.</string>
     <string name="nm_data_kept">%1$d giliran disimpan setakat ini.</string>
     <string name="nm_data_on_toast">Hidup. Matikan di sini bila-bila masa.</string>
-    <string name="nm_data_off_toast">Mati. Tiada apa-apa lagi disimpan.</string>
-    <string name="nm_data_delete">Padam perbualan yang disimpan</string>
-    <string name="nm_data_delete_sub">Membuang setiap giliran yang disimpan daripada akaun ini, sama ada suis hidup atau mati sekarang. Mematikan suis mengekalkan apa yang sudah disimpan sehingga anda memadamnya di sini.</string>
-    <string name="nm_data_delete_confirm">Perbualan yang disimpan dibuang dari pelayan. Ini tidak boleh dibuat asal.</string>
-    <string name="nm_data_deleted">%1$d giliran dipadam.</string>
+    <string name="nm_data_off_toast">Dimatikan. Tiada lagi yang masuk ke set latihan.</string>
+    <string name="nm_data_delete">Padam rekod dan perbualan yang disimpan</string>
+    <string name="nm_data_delete_sub">Mengalih keluar rekod sembang akaun ini dan setiap giliran latihan yang disimpan daripadanya, sama ada suis sedang hidup atau mati. Mematikan suis mengekalkan apa yang disimpan sehingga anda memadamnya di sini.</string>
+    <string name="nm_data_delete_confirm">Rekod sembang anda dan giliran latihan yang disimpan akan dialih keluar daripada pelayan. Ini tidak boleh dibuat asal.</string>
+    <string name="nm_data_deleted">Dipadam: %1$d giliran rekod, %2$d fail, %3$d giliran latihan.</string>
     <string name="nm_data_sign_in">Log masuk ke nanoMuse Cloud untuk menggunakannya.</string>
     <string name="nm_data_privacy">Dasar privasi</string>
     <string name="nm_data_status_on">Hidup</string>
@@ -1035,6 +1062,8 @@
     <string name="nm_sync_side_title">Segerakkan juga sembang sampingan</string>
     <string name="nm_sync_side_sub">Mati: sembang sampingan kekal pada peranti ini. Hidup: sembang sampingan peranti ini pergi ke akaun, dan sembang sampingan peranti lain datang ke sini.</string>
     <string name="nm_sync_working">%1$s sedang mengusahakannya…</string>
+    <string name="nm_sync_working_step">%1$s sedang mengusahakannya: %2$s</string>
+    <string name="nm_sync_waiting">%1$s sedang menunggu anda</string>
     <string name="nm_devices_ask">Tanya peranti ini</string>
     <string name="nm_devices_ask_hint">Ketik peranti yang dalam talian untuk menulis kepadanya dari sembang: mesej bermula dengan @ dan namanya, dan peranti itu yang melakukan kerja.</string>
     <string name="nm_reach_the_provider">penyedia</string>
@@ -1113,7 +1142,6 @@
     <string name="nm_cloud_provider_no_delete">Pembekal ini ialah akaun nanoMuse Cloud anda. Matikan di atas untuk berhenti menggunakan modelnya; untuk log keluar, buka Tetapan › nanoMuse Cloud.</string>
     <string name="nm_welcome_own_key">Guna kunci API sendiri</string>
     <string name="nm_useit_title">Guna untuk</string>
-    <string name="nm_useit_body">Pilih apa yang patut diuruskan kunci ini. Selebihnya kekal pada nanoMuse Cloud.</string>
     <string name="nm_useit_body_signed_out">Pilih apa yang patut diuruskan kunci ini.</string>
     <string name="nm_useit_use">Guna</string>
     <string name="nm_useit_not_now">Bukan sekarang</string>
@@ -1153,4 +1181,44 @@
     <string name="nm_font_scale_medium">Sederhana</string>
     <string name="nm_font_scale_large">Besar</string>
     <string name="nm_font_scale_extra_large">Sangat besar</string>
+
+    <!-- nanoMuse: backup choices and the headless run (#560, #561) -->
+    <string name="nm_backup_chat_files">Fail dalam sembang</string>
+    <string name="nm_backup_chat_files_on">Setiap lampiran, fail punggah dan fail ruang kerja dibawa bersama mesej.</string>
+    <string name="nm_backup_chat_files_off">Mesej sahaja. Fail disenaraikan, tidak dibawa; pemulihan mengembalikan sembang tanpa fail. Pakej kekal kecil untuk pelayan yang menolak muat naik besar.</string>
+    <string name="nm_backup_hint_too_large">Pelayan menolak pakej kerana saiznya. Selalunya ini had muat naik pelayan (nginx: client_max_body_size); naikkan had itu, atau sandarkan sembang tanpa failnya.</string>
+    <string name="nm_backup_delivery_failed">Penghantaran gagal.</string>
+    <string name="nm_backup_run_needs_passphrase">Penyulitan dihidupkan, dan frasa laluan ditaip di halaman Sandaran; larian dari shell tidak boleh memintanya. Mulakan sandaran di halaman itu, atau matikan penyulitan di sana.</string>
+    <string name="nm_backup_run_started">Sandaran dimulakan dari shell.</string>
+
+    <!-- The line under the typing dots while the model has not said anything yet -->
+    <string name="nm_wait_busy">Model sedang sibuk, sudah %1$d s</string>
+    <string name="nm_wait_queued">%1$d di hadapan anda, sudah %2$d s</string>
+    <string name="nm_wait_next">Anda seterusnya, sudah %1$d s</string>
+    <string name="nm_fb_up">Jawapan yang baik</string>
+    <string name="nm_fb_down">Jawapan kurang baik</string>
+    <string name="nm_fb_why">Apa yang salah?</string>
+    <string name="nm_fb_reason_wrong">Salah</string>
+    <string name="nm_fb_reason_unhelpful">Tidak membantu</string>
+    <string name="nm_fb_reason_unsafe">Tidak sepatutnya berbuat begitu</string>
+    <string name="nm_fb_reason_slow">Terlalu perlahan</string>
+    <string name="nm_fb_reason_other">Perkara lain</string>
+    <string name="nm_fb_skip">Langkau</string>
+    <string name="nm_fb_thanks">Dicatat, terima kasih</string>
+    <string name="nm_stop_why">Kenapa dihentikan?</string>
+    <string name="nm_stop_reason_wrong">Arahnya salah</string>
+    <string name="nm_stop_reason_slow">Terlalu perlahan</string>
+    <string name="nm_stop_reason_changed_mind">Berubah fikiran</string>
+    <string name="nm_stop_reason_done">Sudah siap</string>
+    <string name="nm_stop_reason_other">Perkara lain</string>
+    <string name="nm_feed_limit_notice">%1$d hantaran yang dijana tidak dimuatkan kerana had harian 12.</string>
+
+    <!-- Context maintenance -->
+    <string name="nm_context_compacting">Memendekkan konteks (anggaran %1$d / %2$d token).</string>
+    <string name="nm_context_compact_deferred">Konteks tidak dapat dipendekkan. Pemprosesan diteruskan kerana masih muat dalam tetingkap konteks model.</string>
+    <string name="nm_context_limit_reached">Konteks menghampiri had model dan tidak dapat dipendekkan. Cuba ringkaskan semula atau mulakan perbualan baharu.</string>
+    <string name="nm_context_compact_timeout">Peringkasan konteks tamat masa selepas %1$d saat (%2$d panggilan model).</string>
+    <string name="nm_context_compact_idle_timeout">Pemadatan dihentikan selepas %1$d saat tanpa respons (%2$d panggilan model).</string>
+    <string name="nm_context_compact_no_gain">Ringkasan tidak memendekkan konteks. Kandungan asal dikekalkan.</string>
+    <string name="nm_context_compact_incomplete">Model tidak mengembalikan ringkasan lengkap. Konteks asal dikekalkan.</string>
 </resources>

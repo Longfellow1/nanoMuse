@@ -32,6 +32,8 @@ timeout_ms = 30000
 
 `NANOMUSE_BROWSER_ENABLED=1` 打开这个工具；`NANOMUSE_BROWSER_BACKEND` 选后端。在手机上（`NANOMUSE_DEVICE=android`）这个工具默认是开着的。
 
+把运行时嵌进自己程序、又自带浏览器（比如一个远程浏览器服务）的，不需要第三个配置项：给 `Browser` 工具一个 `backend_factory`，也就是一个返回 `BrowserBackend` 的可调用对象（`nanomuse/tools/browser_backends.py`，两个内建后端实现的就是这个接口）。新开会话时工具用它给的后端，不再去找 Playwright 或手机，之后一切照旧：同一套动作驱动它，App 显示它的画面、可以接管，`close` 和工具的清理会关掉它，每个 URL 打开前都先过 Sentinel。第一次会话之前 App 看到的后端名是 `custom`，之后是这个后端自己的 `kind`。只有它的后端被关掉之后才会再次调用工厂，所以一个会话始终只有一个后端。
+
 ## 智能体能做什么 {#what-the-agent-can-do}
 
 工具的动作，两个后端完全一样：
@@ -50,6 +52,10 @@ timeout_ms = 30000
 | `fetch url [method] [body]` | 带着浏览器 cookie 的一次 HTTP 请求，不渲染页面：JSON 格式的订单列表、登录后才能拿到的 `.ics`、一次表单提交 |
 | `profile name` | 以 `mobile`（412×915，手机的 user agent）或 `desktop`（1280×900）的身份出现，或者自定义 user agent 和尺寸 |
 | `close` | 关闭页面；profile 和它的 cookie 留着 |
+
+`navigate` 只接受公网 HTTP 和 HTTPS 地址。运行时会检查起始主机和导航完成后的
+URL，所以 `localhost`、私网地址，以及重定向进本地网络的公网 URL 都会被拒绝。
+Playwright 后端还会在浏览器请求继续前再检查一次，缩短 DNS 检查与连接之间的窗口。
 
 每个改变页面的动作都往聊天里发一帧：页面的 JPEG、标题和 URL，再加一句刚发生了什么的说明（「点击了“登录”」）。帧的尺寸就是 profile 视口的 CSS 像素尺寸，所以图上的一个点就是页面上的同一个点；接管靠的就是这一点。它们在服务器内存里保留到会话结束；每段聊天留最近十来帧。
 

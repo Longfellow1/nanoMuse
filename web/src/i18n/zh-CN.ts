@@ -83,6 +83,21 @@ const zhCN: Record<string, string> = {
   "{name} is on it": "{name} 正在处理",
   "Browser: {title}": "浏览器：{title}",
 
+  // ── Feedback: the thumbs under a reply, the question after a Stop ────────────────
+  "Good reply": "回答得好",
+  "Not a good reply": "回答得不好",
+  "What was wrong?": "哪里不对？",
+  Wrong: "答错了",
+  "Not helpful": "没帮上忙",
+  "Should not have done that": "不该这么做",
+  "Too slow": "太慢了",
+  "Another reason": "其他原因",
+  "Noted, thanks": "收到，谢谢",
+  "Why did you stop it?": "为什么停下来？",
+  "It was going wrong": "方向不对",
+  "Changed my mind": "改主意了",
+  "It was already done": "已经做完了",
+
   // ── Cards: approvals, questions, browser, artifacts ───────────────────────────────
   safe: "安全",
   moderate: "中等",
@@ -369,6 +384,7 @@ const zhCN: Record<string, string> = {
   "Recent changes": "最近的改动",
   Merged: "已合并",
   Dropped: "已去掉",
+  Forgot: "已忘记",
   Updated: "已更新",
   restored: "已恢复",
   Undo: "撤销",
@@ -473,6 +489,8 @@ const zhCN: Record<string, string> = {
   "{n} min before {what}": "{what}开始前 {n} 分钟",
   "webhook “{match}”": "Webhook“{match}”",
   webhook: "Webhook",
+  "device “{match}” coming online": "上线的设备“{match}”",
+  "any device coming online": "任何设备上线",
   "Nothing yet. Tell {name} “when the landlord writes back, summarise it and draft a reply” or “half an hour before any review, brief me”.":
     "还没有。告诉 {name}“房东回信时，帮我总结并起草回复”或“任何评审开始前半小时，给我一份简报”。",
   "fired {n}×": "触发 {n} 次",
@@ -491,11 +509,14 @@ const zhCN: Record<string, string> = {
   Copy: "复制",
   "New mail": "新邮件",
   "Before an event": "日程开始前",
+  "Device online": "设备上线",
   Webhook: "Webhook",
   "Connect a mailbox under Connections first.": "请先在“连接”里接入邮箱。",
   "Add a calendar under Connections first.": "请先在“连接”里添加日历。",
+  "Join the hub under Devices first.": "请先在“设备”里加入 Hub。",
   "Words in the sender or subject (empty: any mail)": "发件人或主题中的词（留空：任何邮件）",
   "Words in the title or place (empty: any event)": "标题或地点中的词（留空：任何日程）",
+  "Words in the device name or kind (empty: any device)": "设备名称或类型中的词（留空：任何设备）",
   "A name for this hook": "给这个 Webhook 起个名字",
   "Minutes before": "提前分钟数",
   "min before": "分钟前",
@@ -1023,6 +1044,9 @@ const zhCN: Record<string, string> = {
   "Report a bug or ask for a feature": "反馈问题 / 提需求",
   // -- data controls (relay 0.9): the one switch over what the relay keeps --
   "Data controls": "数据控制",
+  "Download your agent data": "下载你的智能体数据",
+  "A zip of what this runtime keeps about you: the memory, the goals, the reminders, the triggers, the address book and the chats. It never contains the keys themselves.":
+    "这个运行时为你保存的内容打成一个 zip：记忆、目标、提醒、触发器、通讯录和聊天记录。里面绝不会有密钥本身。",
   "Help improve nanoMuse's AI models": "帮助改进 nanoMuse 的 AI 模型",
   "While this is on, the text of your chats with the nanoMuse Cloud models (what you wrote, what it answered and the tools it chose to call) is kept on the relay to train the community's own open model. Not your memory or SOUL (the system prompt), not what tools returned, not pictures, and never next to who you are. Your own API key never passes through the relay.":
     "开启后，你与 nanoMuse Cloud 模型对话的文字（你写的、它回答的，以及它选择调用的工具）会保存在中继上，用来训练社区自己的开源模型。不保存你的记忆和 SOUL（系统提示）、工具返回的内容和图片，也不和你的身份放在一起。用自己的 API key 时，对话不经过中继。",
@@ -1042,7 +1066,7 @@ const zhCN: Record<string, string> = {
   "Set a password": "设一个密码",
   "Your account is in. With a password, your phone and your other computers sign in at once, without waiting for a code. Optional; you can set one later under Account.":
     "账号已登录。设了密码，手机和其他电脑就能直接登录，不用再等验证码。可选，以后也可以在「账号」里设置。",
-  "At least 8 characters": "至少 8 个字符",
+  "At least {n} characters": "至少 {n} 个字符",
   "Set the password": "设置密码",
   "Not now": "以后再说",
   "I already starred": "已经点过了",
@@ -1334,7 +1358,7 @@ const zhCN: Record<string, string> = {
   Change: "修改",
   Set: "设置",
   "Current password": "当前密码",
-  "New password (8 characters or more)": "新密码（至少 8 位）",
+  "New password ({n} characters or more)": "新密码（至少 {n} 位）",
   "Once more": "再输一次",
   "The two do not match.": "两次输入不一致。",
   "Change password": "修改密码",
@@ -1507,6 +1531,8 @@ const zhCN: Record<string, string> = {
   "This account has used its tokens.": "这个账号的额度已经用完。",
   "This account is disabled.": "这个账号已被停用。",
   "That model is not offered here.": "这里不提供这个模型。",
+  "nanoMuse Cloud no longer generates pictures or clips. Add your own image or video provider and API key under Models.":
+    "nanoMuse Cloud 不再生成图片和视频。请在「模型」里添加自己的图片或视频服务商和 API key。",
   "Too many requests; slow down a little.": "请求太频繁了，稍微慢一点。",
   "The free allowance is used up. Invite a friend (the relay adds to both your allowances) or add your own model key; your sign-in and your devices keep working either way.":
     "免费额度已用完。邀请一位新用户（你和对方的额度都会增加），或者换成自己的 key；无论选哪个，登录和多设备功能都不受影响。",
@@ -1562,6 +1588,15 @@ const zhCN: Record<string, string> = {
   "Describe a new look": "描述一个新形象",
   "One sentence is enough: what it is, what it wears, its air. Pick a style and your image model draws four to choose from.":
     "一句话就够：它是什么、穿什么、什么气质。选一种风格，你的图像模型会画四张让你挑。",
+  "AI-generated inspiration": "AI 生成的灵感示例",
+  "Moss Courier": "苔邮使",
+  "a tiny moss-covered courier with leaf ears and an unmarked canvas satchel": "一只覆着柔软苔藓、长着叶片耳朵、背着素面帆布包的小邮使",
+  "Tide Tinker": "潮汐巧匠",
+  "a seafoam axolotl tinkerer with coral frills and a plain tool pouch": "一只海沫绿色、长着珊瑚色外鳃、系着素面工具袋的蝾螈巧匠",
+  "Dusk Moth": "暮光蛾",
+  "a thoughtful indigo moth with peach wing spots, a cream collar and round glasses": "一只沉静的靛蓝色飞蛾，翅上有桃色斑点，戴米白围领和圆眼镜",
+  "Copper Acorn": "铜果",
+  "a small acorn-shaped copper automaton with sage panels and a muted-blue scarf": "一个橡果形的小铜制自动机，配鼠尾草绿面板和灰蓝色围巾",
   "a round, custard-yellow baby dragon with small orange horns and folded little wings": "一只圆滚滚的奶黄色小龙，橙色小角，折着小翅膀",
   "Drawing…": "正在画…",
   "Draw four more": "再画四张",
@@ -1587,6 +1622,9 @@ const zhCN: Record<string, string> = {
   // ── The desktop's sidebar: the rail, the chats column, the menu ───────────────────
   Search: "搜索",
   "Search chats": "搜索对话",
+  "Search settings": "搜索设置",
+  "On this page": "本页",
+  "Nothing matches": "没有匹配的内容",
   "Side chats": "旁聊",
   "Start a side chat": "发起旁聊",
   "Side chats are an optional way to keep conversations organised by topic.": "旁聊是按主题整理对话的可选方式。",
@@ -1725,6 +1763,8 @@ const zhCN: Record<string, string> = {
   "On. This device's side chats go to the account; the other devices' are on their way.": "已打开。本机的旁聊会上传到账号，其他设备的旁聊正在同步过来。",
   "Off. Side chats stay on this device from now on.": "已关闭。从现在起，旁聊只留在本机。",
   "{device} is working…": "{device} 正在处理…",
+  "{device} is working: {detail}": "{device} 正在处理：{detail}",
+  "{device} is waiting for you": "{device} 在等你确认",
   "From {device}": "来自 {device}",
   "to {device}": "发给 {device}",
   "This goes to {device}.": "这条会发给 {device}。",
@@ -1737,6 +1777,8 @@ const zhCN: Record<string, string> = {
   "Open the chat. It introduces itself and asks your name.": "打开聊天。它会介绍自己，并问你的名字。",
   "Pick a name for me, or type one": "给我挑一个名字，或者自己输入一个",
   "Something else": "自己起一个",
+  "Type a name for me": "输入你想叫我什么",
+  "Call me this": "就叫这个",
 
   // the own-key model form: the proxy for this provider
   "Proxy (optional)": "代理（可选）",

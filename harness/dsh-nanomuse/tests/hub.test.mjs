@@ -3,7 +3,7 @@
 // reconnect after a drop, and a refused key.
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { HubClient, HubError } from '../lib/hub.js'
+import { helloLlm, HubClient, HubError } from '../lib/hub.js'
 
 const OPEN = 1
 
@@ -312,4 +312,30 @@ test('a ping is sent on the interval; a relay that answers nothing for two pings
   assert.equal(h.client.connected, true)
   assert.deepEqual(states, [false, true])
   h.client.stop()
+})
+
+test('hello names the model only as two plain ids; a key, a URL or a sentence is left out', () => {
+  assert.deepEqual(helloLlm('cloud', 'Qwen/Qwen3.6-27B-FP8'), { provider: 'cloud', model: 'Qwen/Qwen3.6-27B-FP8' })
+  assert.deepEqual(helloLlm('openrouter', 'anthropic/claude-sonnet-4.5:beta'), { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.5:beta' })
+  assert.equal(helloLlm('', 'gpt-5'), undefined)
+  assert.equal(helloLlm('custom', ''), undefined)
+  assert.equal(helloLlm('https://api.example.com/v1', 'gpt-5'), undefined)
+  assert.equal(helloLlm('custom', 'sk-abcdefghijklmnopqrstuvwxyz0123456789 keep this secret'), undefined)
+  assert.equal(helloLlm('custom', 'm'.repeat(81)), undefined)
+})
+
+test('a push goes out only once the relay lists event_push, and features are read again on every welcome', async () => {
+  const h = harness()
+  const s = await connected(h)
+  const body = { stage: 'approval', approval_id: 'ap_1', any_device: true }
+  assert.equal(h.client.push('*', body), false, 'a relay without the feature hears no push')
+  assert.equal(s.sent.some((f) => f.type === 'event'), false)
+
+  s.push({ type: 'welcome', device_id: DEVICE.id, devices: [], server: { features: ['event_push', 7] } })
+  assert.deepEqual(h.client.features, ['event_push'])
+  assert.equal(h.client.push('*', body), true)
+  assert.deepEqual(s.sent.at(-1), { type: 'event', to: '*', body })
+
+  h.client.stop()
+  assert.equal(h.client.push('*', body), false, 'nothing is queued while the socket is down')
 })

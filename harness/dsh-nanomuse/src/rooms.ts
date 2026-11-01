@@ -29,13 +29,15 @@ import { avatarFence, avatarMemoryLine } from './avatar-flow.ts'
 import { FENCE_FEED, FENCE_GOAL, FENCE_GOAL_UPDATE, findFences, goalCategory, goalCheckPrompt, goalCreationNote, goalHomeNote, goalOpener, parseFeedDraft, parseGoalBlock, parseGoalUpdate, parseIdeas, type GoalBlock, type GoalUpdateBlock, type IdeaKind, type StaticIdea } from './fences.ts'
 import { afterTurn, boundTo, currentSuggestions, dismissChooser, FIRST_RUN_EMPTY, pickName, promptAddendum, readFirstRun, startConversation, type FirstRunState } from './firstrun.ts'
 import { DEFAULT_NUDGES, dueAsk, LEDGER_EMPTY, NUDGES_EVERY_MS, NUDGES_ORIGIN, NUDGES_TIMEOUT_MS, readLedger, readNudges, recordAsk, recordDay, recordStarred, recordTask, type Ask, type Moment, type NudgeLedger, type NudgesPolicy, type NudgesView } from './nudges.ts'
+import { homeDir, homeWorkspace } from './home.ts'
 import { packageAssetsDir } from './profile.ts'
+import { describeCall, ownWords, parseArgs } from './steps.ts'
 import { randomBytes } from 'node:crypto'
 import { createReadStream, readFileSync } from 'node:fs'
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, open as openFile, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { deflateRawSync } from 'node:zlib'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { basename, extname, isAbsolute, join, resolve } from 'node:path'
+import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { Service, type Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, type ContextFormed } from '@deepseek-ai/dsh-llm'
@@ -71,6 +73,81 @@ const ACTIVITY_KEEP = 60
 const LIBRARY_KEEP = 500
 const CHECK_EVERY_MS = 30 * 60_000
 const FIRST_CHECK_MS = 90_000
+// what one zip of the classic format holds (16-bit entry count, 32-bit offsets, with room)
+export const EXPORT_MAX_FILES = 65_000
+export const EXPORT_MAX_BYTES = 3 * 1024 * 1024 * 1024
+// a single file larger than this is left out, as it always was (a stray video in the library)
+export const EXPORT_MAX_FILE_BYTES = 64 * 1024 * 1024
+
+export interface ExportSource {
+  name: string
+  path?: string
+  data?: Buffer
+  at: Date
+}
+
+export interface ExportBudget {
+  files: number
+  bytes: number
+}
+
+/** A proxy kept in desktop.json may contain credentials; exported settings never do. */
+export function redactProxyUserinfo(data: Buffer): Buffer {
+  try {
+    const raw = JSON.parse(data.toString('utf8')) as Record<string, unknown>
+    if (typeof raw.proxy !== 'string') return data
+    const proxy = new URL(raw.proxy)
+    if (!proxy.username && !proxy.password) return data
+    proxy.username = ''
+    proxy.password = ''
+    raw.proxy = proxy.href.replace(/\/$/, '')
+    return Buffer.from(`${JSON.stringify(raw, null, 2)}\n`)
+  } catch {
+    return data
+  }
+}
+
+/**
+ * The files under one export root, by name, for the zip. Links and special files are
+ * left out rather than followed (a link in the workspace must not pull another folder
+ * into the export), so are files over `EXPORT_MAX_FILE_BYTES`; a root that is not there
+ * is nothing. The count and size are what one zip holds; past them the export fails
+ * rather than writes a zip no tool can open.
+ */
+export async function scanExportRoot(root: string, under: string, budget: ExportBudget, skip: (name: string) => boolean = () => false): Promise<ExportSource[]> {
+  const base = resolve(root)
+  const rootInfo = await lstat(base).catch(() => null)
+  if (!rootInfo || rootInfo.isSymbolicLink() || !rootInfo.isDirectory()) return []
+  const entries: ExportSource[] = []
+  const add = async (folder: string, prefix: string): Promise<void> => {
+    let names: string[]
+    try {
+      names = await readdir(folder)
+    } catch {
+      return
+    }
+    for (const name of names) {
+      if (skip(name)) continue
+      const full = resolve(folder, name)
+      const rel = relative(base, full)
+      if (!rel || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) continue
+      const info = await lstat(full).catch(() => null)
+      if (!info || info.isSymbolicLink()) continue
+      if (info.isDirectory()) {
+        await add(full, `${prefix}${name}/`)
+        continue
+      }
+      if (!info.isFile() || info.size > EXPORT_MAX_FILE_BYTES) continue
+      budget.files += 1
+      budget.bytes += info.size
+      if (budget.files > EXPORT_MAX_FILES) throw new Error(`the export has more than ${EXPORT_MAX_FILES} files, more than one zip holds`)
+      if (budget.bytes > EXPORT_MAX_BYTES) throw new Error(`the export is over ${EXPORT_MAX_BYTES} bytes, more than one zip holds`)
+      entries.push({ name: `${prefix}${name}`, path: full, at: info.mtime })
+    }
+  }
+  await add(base, under)
+  return entries
+}
 
 export const AREAS = ['planning', 'research', 'goals', 'money', 'health', 'home', 'learning', 'people', 'files', 'fun', 'news'] as const
 export type Area = (typeof AREAS)[number]
@@ -238,6 +315,12 @@ interface Store {
   activity: ActivityRecord[]
   /** When the first-run introduction was posted, so it happens once. */
   introducedAt: number
+  /**
+   * The chats of the batches run so far (the feed's), newest first: a batch is the agent's
+   * workbench, not a chat of the person's, so these are kept out of the conversation sync
+   * (`NanomuseCloud`, through `isBatch`) and never reach the account's other devices.
+   */
+  batches: string[]
 }
 
 /** What the browser mirrors. */
@@ -302,7 +385,10 @@ const EMPTY: Store = {
   docs: { identity: '', soul: '', identityAt: 0, soulAt: 0 },
   activity: [],
   introducedAt: 0,
+  batches: [],
 }
+/** Batch chats remembered (one a day for the feed): enough for the archive's lifetime. */
+const BATCHES_KEEP = 400
 /** Activity records kept, steps per record, and how much of a step's text. */
 const ACTIVITY_RECORDS = 80
 const ACTIVITY_STEPS = 60
@@ -326,6 +412,35 @@ const MIME: Record<string, string> = {
   '.pdf': 'application/pdf', '.html': 'text/html; charset=utf-8', '.htm': 'text/html; charset=utf-8',
 }
 const TEXT_KINDS = new Set(['.md', '.markdown', '.txt', '.html', '.htm', '.csv', '.json', '.tex', '.svg'])
+/** What the Library takes in from disk for now: Markdown and plain text, which the editor shows and the agent reads as they are (#689). */
+export const IMPORT_KINDS = new Set(['.md', '.markdown', '.txt'])
+/** The most one imported file may hold — the editor's own reading limit. */
+export const IMPORT_MAX_BYTES = 2 * 1024 * 1024
+/** Characters no file system takes in a name, control characters, and the path separators (one segment only). */
+const UNSAFE_IN_NAME = /[\u0000-\u001f<>:"/\\|?*]+/g
+const NAME_MAX = 80
+
+/** The stem of a file name a person typed or brought in, made safe for every file system: one path
+ * segment, no reserved characters, trailing dots and spaces dropped (Windows), at most 80 characters;
+ * `''` when nothing is left. */
+export function safeStem(name: string): string {
+  const base = name.replace(/\\/g, '/').split('/').filter(Boolean).pop() ?? ''
+  const stem = base.replace(/\.[^.]*$/, '')
+  return stem.replace(UNSAFE_IN_NAME, ' ').replace(/\s+/g, ' ').trim().replace(/[. ]+$/, '').slice(0, NAME_MAX).trim()
+}
+
+/** `stem.ext` under `folder`, or `stem (2).ext`, `stem (3).ext`… when that name is taken. */
+export async function freePath(folder: string, stem: string, ext: string): Promise<string> {
+  for (let n = 1; n < 1000; n++) {
+    const candidate = join(folder, `${stem}${n > 1 ? ` (${n})` : ''}${ext}`)
+    try {
+      await lstat(candidate)
+    } catch {
+      return candidate
+    }
+  }
+  throw new RelayError(409, 'exists', 'Too many files of that name')
+}
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -474,15 +589,7 @@ export default class NanomuseRooms extends Service {
       await this.saveFirstRun()
       return { sessionId: synced }
     }
-    const folder = join(homeDir(), 'nanoMuse')
-    await mkdir(folder, { recursive: true })
-    let workspaceId: string | undefined
-    try {
-      workspaceId = (await (this.ctx.get('workspaceRegistry') as RegistryLike | undefined)?.create(folder, 'nanoMuse'))?.id
-    } catch (error) {
-      this.warn('home workspace', error)
-    }
-    const created = await sc.create(workspaceId ? { agentPreset: 'nanomuse', workspaceId: workspaceId as NonNullable<SessionCreateRequest['workspaceId']> } : { agentPreset: 'nanomuse', cwd: folder })
+    const created = await sc.create(await homeWorkspace(this.ctx, (error) => this.warn('home workspace', error)))
     await sc.rename({ sessionId: created.sessionId, title: this.lang.startsWith('zh') ? '主要聊天' : 'Main chat' }).catch(() => undefined)
     // a conversation that already ran its course on an older chat stays over; a fresh install begins
     this.firstRun = startConversation(this.firstRun.phase === 'done' ? this.firstRun : { ...this.firstRun, phase: 'none' }, created.sessionId)
@@ -946,29 +1053,19 @@ export default class NanomuseRooms extends Service {
     const folder = await downloadsDir()
     const out = join(folder, `nanoMuse-data-${stamp}.zip`)
     await mkdir(folder, { recursive: true })
-    const entries: ZipEntry[] = []
-    const add = async (folder: string, under: string, skip: (name: string) => boolean = () => false) => {
-      let names: string[]
-      try {
-        names = await readdir(folder)
-      } catch {
-        return
-      }
-      for (const name of names) {
-        if (skip(name)) continue
-        const full = join(folder, name)
-        const info = await stat(full).catch(() => null)
-        if (!info) continue
-        if (info.isDirectory()) await add(full, `${under}${name}/`, skip)
-        else if (info.size <= 64 * 1024 * 1024) entries.push({ name: `${under}${name}`, data: await readFile(full), at: info.mtime })
-      }
-    }
-    await add(join(home, 'nanomuse'), 'nanomuse/', (name) => name.endsWith('.tmp'))
-    await add(join(home, 'sessions'), 'sessions/')
+    const budget: ExportBudget = { files: 0, bytes: 0 }
+    const entries: ExportSource[] = [
+      ...await scanExportRoot(join(home, 'nanomuse'), 'nanomuse/', budget, (name) => name.endsWith('.tmp')),
+      ...await scanExportRoot(join(home, 'sessions'), 'sessions/', budget),
+    ]
     const prefs = join(home, 'desktop.json')
-    if (await stat(prefs).catch(() => null)) entries.push({ name: 'desktop.json', data: await readFile(prefs), at: new Date() })
+    const prefsInfo = await lstat(prefs).catch(() => null)
+    if (prefsInfo?.isFile()) {
+      // the proxy address may carry a password: the export never does
+      entries.push({ name: 'desktop.json', data: redactProxyUserinfo(await readFile(prefs)), at: prefsInfo.mtime })
+    }
     entries.push({ name: 'README.txt', at: new Date(), data: Buffer.from(['Your nanoMuse data, exported ' + new Date().toISOString(), '', 'nanomuse/cloud.json    the account snapshot (no sign-in token)', 'nanomuse/profile.json  the agent’s name and look; faces/ its pictures', 'nanomuse/rooms.json    feed, ideas, goals, the library index and memory', 'sessions/              the chats, as DeepSeek Harness keeps them (zstd-compressed JSON lines)', ''].join('\n'))})
-    await writeFile(out, zip(entries), { mode: 0o600 })
+    await writeZipFile(out, entries)
     const sc = this.ctx.get('sessionController')
     if (sc) await sc.openWorkspacePath({ path: out, action: 'reveal' }, new AbortController().signal).catch(() => undefined)
     return out
@@ -1307,6 +1404,40 @@ export default class NanomuseRooms extends Service {
     await this.save()
   }
 
+  /**
+   * A blank Markdown file in the Library folder, for the person to write in the editor
+   * themselves (#689): `Untitled.md` (`未命名.md`), numbered when the name is taken.
+   */
+  async newDocument(name: string): Promise<LibraryItem> {
+    const folder = this.libraryFolder()
+    await mkdir(folder, { recursive: true })
+    const stem = safeStem(name) || (this.lang.startsWith('zh') ? '未命名' : 'Untitled')
+    const path = await freePath(folder, stem, '.md')
+    await writeFile(path, '', { encoding: 'utf8', flag: 'wx' })
+    const item = await this.addToLibrary(path, '', '')
+    if (!item) throw new RelayError(500, 'internal', 'The file could not be listed')
+    return item
+  }
+
+  /**
+   * A file brought in from disk (#689): its text is written under the Library folder with the
+   * name it had (numbered when taken) and listed on the Documents shelf, so the editor shows it
+   * and a Library chat can read it. Markdown and plain text only for now; other formats will
+   * come once there is a conversion to Markdown.
+   */
+  async importDocument(name: string, text: string): Promise<LibraryItem> {
+    const ext = extname(name).toLowerCase()
+    if (!IMPORT_KINDS.has(ext)) throw new RelayError(415, 'unsupported', 'Only Markdown and plain-text files can be imported for now')
+    if (Buffer.byteLength(text, 'utf8') > IMPORT_MAX_BYTES) throw new RelayError(413, 'too_large', 'The file is too large to import')
+    const folder = this.libraryFolder()
+    await mkdir(folder, { recursive: true })
+    const path = await freePath(folder, safeStem(name) || 'Document', ext)
+    await writeFile(path, text, { encoding: 'utf8', flag: 'wx' })
+    const item = await this.addToLibrary(path, '', '')
+    if (!item) throw new RelayError(500, 'internal', 'The file could not be listed')
+    return item
+  }
+
   /** A new document / web page / video / podcast: a chat where the agent makes it and presents the file. */
   async createArtifact(kind: string, brief: string): Promise<string> {
     const text = brief.trim()
@@ -1374,15 +1505,15 @@ export default class NanomuseRooms extends Service {
   // ---- the agent's sessions -------------------------------------------------------------
 
   /**
-   * A chat the person will see. It starts in their home folder; a `preset` of
-   * `workspace-write` (used for the Library's creations, whose cwd is the
-   * Library folder) lets the agent write there without asking — everything
-   * outside still asks, as the deployment's presets say.
+   * A chat the person will see. It starts in the home workspace (`~/nanoMuse`, as the main
+   * chat does; never the bare home folder, #705); a `preset` of `workspace-write` (used for
+   * the Library's creations, whose cwd is the Library folder) lets the agent write there
+   * without asking — everything outside still asks, as the deployment's presets say.
    */
   private async open(title: string, prompt: string, options: { cwd?: string; preset?: string; notice?: string } = {}): Promise<string> {
     const sc = this.ctx.get('sessionController')
     if (!sc) throw new RelayError(503, 'no_sessions', 'Chats are not available yet')
-    const created = await sc.create({ agentPreset: 'nanomuse', cwd: options.cwd ?? homeDir() })
+    const created = await sc.create(options.cwd ? { agentPreset: 'nanomuse', cwd: options.cwd } : await homeWorkspace(this.ctx, (error) => this.warn('home workspace', error)))
     await sc.rename({ sessionId: created.sessionId, title: title.slice(0, 80) }).catch(() => undefined)
     await this.say(created.sessionId, prompt, options.preset, options.notice ?? title)
     return created.sessionId
@@ -1524,6 +1655,11 @@ export default class NanomuseRooms extends Service {
     return Boolean(resolved && 'agent' in resolved)
   }
 
+  /** Whether a session is (or was) one of the batches' chats: the sync leaves those out. */
+  isBatch(sessionId: string): boolean {
+    return this.runs.has(sessionId as SessionId) || this.store.batches.includes(sessionId)
+  }
+
   /**
    * A background batch: a chat of its own, the final answer returned, the chat archived. The
    * prompt is the rooms' own, not the person's words, so it goes out as a notice (`summary`, one
@@ -1534,7 +1670,10 @@ export default class NanomuseRooms extends Service {
     const sc = this.ctx.get('sessionController')
     if (!sc) throw new Error('chats are not available yet')
     if (!(await this.ctx.nanomuseCloud.status()).ready) throw new Error('no model is set up')
-    const created = await sc.create({ agentPreset: 'nanomuse', cwd: homeDir() })
+    const created = await sc.create(await homeWorkspace(this.ctx, (error) => this.warn('home workspace', error)))
+    // remembered before a word is said, so the sync never sees the chat as one of the person's
+    this.store.batches = [String(created.sessionId), ...this.store.batches.filter((id) => id !== String(created.sessionId))].slice(0, BATCHES_KEEP)
+    await this.save()
     await sc.rename({ sessionId: created.sessionId, title }).catch(() => undefined)
     const resolved = await sc.resolveAgent(created.sessionId)
     if ('error' in resolved) throw new Error(`the chat could not be opened: ${String(resolved.error)}`)
@@ -1785,6 +1924,7 @@ export default class NanomuseRooms extends Service {
         docs: { ...EMPTY.docs, ...(raw.docs && typeof raw.docs === 'object' ? raw.docs : {}) },
         activity: Array.isArray(raw.activity) ? raw.activity.filter((r) => r && typeof r === 'object' && Array.isArray(r.steps)) : [],
         introducedAt: typeof raw.introducedAt === 'number' ? raw.introducedAt : 0,
+        batches: Array.isArray(raw.batches) ? raw.batches.filter((id): id is string => typeof id === 'string').slice(0, BATCHES_KEEP) : [],
       }
     } catch {
       return structuredClone(EMPTY)
@@ -1836,7 +1976,8 @@ export default class NanomuseRooms extends Service {
       if (req.method === 'GET' && route === '/files') return send(res, 200, { home: homeDir(), library: this.libraryFolder(), downloads: await downloadsDir(), state: join(dshHome(), 'nanomuse') })
       if (req.method === 'GET' && route === '/library/file') return this.serveFile(res, url.searchParams.get('id') ?? '', url.searchParams.get('raw') === '1')
       if (req.method !== 'POST') return send(res, 404, { error: { code: 'not_found', message: `No ${req.method ?? ''} ${route}` } })
-      const body = await json(req)
+      // an imported file travels as text in the body: room for the editor's 2 MiB plus the JSON around it
+      const body = await json(req, route === '/library/import' ? IMPORT_MAX_BYTES * 2 + 4096 : undefined)
       switch (route) {
         case '/lang': {
           const lang = String(body.lang ?? '').trim().slice(0, 20)
@@ -1932,6 +2073,10 @@ export default class NanomuseRooms extends Service {
           return send(res, 204)
         case '/library/create':
           return send(res, 200, { sessionId: await this.createArtifact(String(body.kind ?? 'document'), String(body.text ?? '')) })
+        case '/library/new':
+          return send(res, 200, { item: await this.newDocument(String(body.name ?? '')) })
+        case '/library/import':
+          return send(res, 200, { item: await this.importDocument(String(body.name ?? ''), String(body.text ?? '')) })
         case '/library/delete':
           await this.removeFromLibrary(String(body.id ?? ''))
           return send(res, 204)
@@ -2157,10 +2302,6 @@ function ruleOf(r: ScheduleRecordLike): string {
   }
 }
 
-function homeDir(): string {
-  return process.env.HOME ?? process.env.USERPROFILE ?? process.cwd()
-}
-
 /** `~/Downloads`, or what the desktop calls it (`~/下载` on a Chinese Linux: user-dirs.dirs). */
 async function downloadsDir(): Promise<string> {
   const home = homeDir()
@@ -2306,63 +2447,6 @@ function stripDoc(text: string): string {
 
 // ---- tool calls, in a line ---------------------------------------------------------------------
 
-function parseArgs(raw: string): Record<string, unknown> {
-  try {
-    const parsed: unknown = JSON.parse(raw)
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {}
-  } catch {
-    return {}
-  }
-}
-
-/** The model's own words for a step, where the tool takes them: dsh's bash, pwsh and run_code
- * (`description`), the runtime's tools over MCP (`step`). Empty when it gave none. */
-export function ownWords(raw: string): string {
-  const args = parseArgs(raw)
-  for (const key of ['step', 'description']) {
-    const v = args[key]
-    if (typeof v === 'string' && v.trim()) return v.replace(/\s+/g, ' ').trim()
-  }
-  return ''
-}
-
-export function describeCall(name: string, raw: string): string {
-  const args = parseArgs(raw)
-  const s = (key: string) => (typeof args[key] === 'string' ? (args[key] as string).replace(/\s+/g, ' ').trim() : '')
-  const short = (v: string, n = 80) => (v.length > n ? `${v.slice(0, n - 1)}…` : v)
-  const base = name.replace(/^mcp__[^_]+(?:_[^_]+)*?__/, '')
-  const own = ownWords(raw)
-  if (own) return short(own)
-  switch (base) {
-    case 'bash':
-    case 'pwsh':
-      return short(s('command') || s('cmd'))
-    case 'read_file':
-    case 'write_file':
-    case 'edit_file':
-    case 'str_replace_editor':
-    case 'create_file':
-      return short(s('path') || s('file_path') || s('file'))
-    case 'web_search':
-      return short(s('query'))
-    case 'web_fetch':
-      return short(s('url'))
-    case 'glob':
-    case 'grep':
-      return short(s('pattern'))
-    case 'schedule_create':
-      return short(s('title') || s('prompt'))
-    case 'ask_user_question':
-      return short(String((args.questions as { question?: string }[] | undefined)?.[0]?.question ?? ''))
-    case 'present':
-      return short(String((args.files as { path?: string }[] | undefined)?.map((f) => f.path).join(', ') ?? ''))
-    default: {
-      const first = Object.values(args).find((v) => typeof v === 'string' && v.trim())
-      return short(typeof first === 'string' ? first : '')
-    }
-  }
-}
-
 function prettyArgs(raw: string): string {
   const args = parseArgs(raw)
   if (!Object.keys(args).length) return raw.slice(0, STEP_TEXT)
@@ -2478,4 +2562,83 @@ export function zip(entries: ZipEntry[]): Buffer {
   end.writeUInt32LE(offset, 16)
   end.writeUInt16LE(0, 20)
   return Buffer.concat([...parts, ...central, end])
+}
+
+/**
+ * Write an export one entry at a time. At most one bounded source file and its
+ * compressed form are resident, rather than the complete export twice.
+ */
+export async function writeZipFile(path: string, entries: ExportSource[]): Promise<void> {
+  await rm(path, { force: true }).catch(() => undefined)
+  const file = await openFile(path, 'wx', 0o600)
+  const central: Buffer[] = []
+  let offset = 0
+  let written = 0
+  try {
+    for (const entry of entries) {
+      let data: Buffer
+      if (entry.data) {
+        data = entry.data
+      } else if (entry.path) {
+        // the file as it is now; one replaced by a link or grown since the scan is left out
+        const info = await lstat(entry.path).catch(() => null)
+        if (!info || info.isSymbolicLink() || !info.isFile() || info.size > EXPORT_MAX_FILE_BYTES) continue
+        data = await readFile(entry.path)
+      } else {
+        throw new Error(`export entry has no source: ${entry.name}`)
+      }
+      const name = Buffer.from(entry.name, 'utf8')
+      const packed = deflateRawSync(data)
+      const stored = packed.length < data.length
+      const body = stored ? packed : data
+      const method = stored ? 8 : 0
+      const crc = crc32(data)
+      const { time, date } = dosTime(entry.at)
+      const local = Buffer.alloc(30)
+      local.writeUInt32LE(0x04034b50, 0)
+      local.writeUInt16LE(20, 4)
+      local.writeUInt16LE(0x0800, 6)
+      local.writeUInt16LE(method, 8)
+      local.writeUInt16LE(time, 10)
+      local.writeUInt16LE(date, 12)
+      local.writeUInt32LE(crc, 14)
+      local.writeUInt32LE(body.length, 18)
+      local.writeUInt32LE(data.length, 22)
+      local.writeUInt16LE(name.length, 26)
+      const dir = Buffer.alloc(46)
+      dir.writeUInt32LE(0x02014b50, 0)
+      dir.writeUInt16LE(20, 4)
+      dir.writeUInt16LE(20, 6)
+      dir.writeUInt16LE(0x0800, 8)
+      dir.writeUInt16LE(method, 10)
+      dir.writeUInt16LE(time, 12)
+      dir.writeUInt16LE(date, 14)
+      dir.writeUInt32LE(crc, 16)
+      dir.writeUInt32LE(body.length, 20)
+      dir.writeUInt32LE(data.length, 24)
+      dir.writeUInt16LE(name.length, 28)
+      dir.writeUInt32LE(offset, 42)
+      await file.write(local)
+      await file.write(name)
+      await file.write(body)
+      central.push(dir, name)
+      offset += local.length + name.length + body.length
+      written += 1
+    }
+    const directory = Buffer.concat(central)
+    const end = Buffer.alloc(22)
+    end.writeUInt32LE(0x06054b50, 0)
+    end.writeUInt16LE(written, 8)
+    end.writeUInt16LE(written, 10)
+    end.writeUInt32LE(directory.length, 12)
+    end.writeUInt32LE(offset, 16)
+    await file.write(directory)
+    await file.write(end)
+    await file.sync()
+  } catch (error) {
+    await file.close()
+    await rm(path, { force: true }).catch(() => undefined)
+    throw error
+  }
+  await file.close()
 }

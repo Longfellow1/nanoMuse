@@ -2,7 +2,7 @@ import { pathToFileURL } from "node:url";
 import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, powerSaveBlocker, screen, shell, systemPreferences, Tray } from "electron";
 import { randomBytes } from "node:crypto";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -11,9 +11,10 @@ import { defaultHelperPath, HELPER_NAME, MacHelper } from "./mac-helper";
 import * as macPermissions from "./mac-permissions";
 import { Operator, SCREEN_PERMISSION_TEXT, type Marker } from "./operator";
 import { startOperatorServer, type OperatorServer } from "./operator-server";
-import { EXTERNAL_URL, navigationVerdict, sameOrigin } from "./navigation";
+import { EXTERNAL_URL, mediaPermissionAllowed, navigationVerdict, sameOrigin } from "./navigation";
+import { readPrivateJson, writePrivateJson } from "./private-json";
 import { relink } from "./profile-link";
-import { maskProxyUrl, proxyEnv, validProxyUrl } from "./proxy";
+import { maskProxyUrl, proxyEnv, trustedRelayHosts, validProxyUrl } from "./proxy";
 import { HostStartWatch, maskToken, waitedText, type WaitState } from "./host-start";
 import { HostWork } from "./host-work";
 import { ProtectedExit, type ExitDialog, type ExitIntent, type WorkItem, type WorkSource } from "./protected-exit";
@@ -341,7 +342,7 @@ function startHost(): Promise<string> {
         // The proxy for the model providers (the Cloud page's Network row): on the Host's
         // environment, which Node's fetch reads with NODE_USE_ENV_PROXY and the runtime's
         // httpx reads as it is; the relay and loopback are on NO_PROXY (src/proxy.ts).
-        const proxied = proxyEnv(prefs.proxy, prefs.relayHosts ?? []);
+        const proxied = proxyEnv(prefs.proxy, trustedRelayHosts());
         Object.assign(env, proxied);
         hostProxy = proxied.HTTPS_PROXY ?? "";
         if (hostProxy) log(`proxy: providers through ${maskProxyUrl(hostProxy)}; never for ${proxied.NO_PROXY}`);
@@ -506,19 +507,22 @@ let restartingHost = false;
  * The operator server and the helper stay; the page reloads under the Host's new token.
  */
 async function restartHost(): Promise<void> {
-  if (restartingHost || quitting || !hostUrl) return;
-  restartingHost = true;
-  log("host: restarting at the person's request");
-  try {
-    await stopHost();
-    restarts = 0;
-    await boot();
-  } catch (exc) {
-    log(`restart failed: ${String(exc)}`);
-    await reportStartupFailure(exc);
-  } finally {
-    restartingHost = false;
-  }
+  if (restartingHost || quitting || !hostUrl || !exitGuard) return;
+  await exitGuard.requestRestart("restart-host", async () => {
+    restartingHost = true;
+    log("host: restarting at the person's request");
+    try {
+      await stopHost();
+      restarts = 0;
+      await boot();
+    } catch (exc) {
+      log(`restart failed: ${String(exc)}`);
+      await reportStartupFailure(exc);
+      throw exc;
+    } finally {
+      restartingHost = false;
+    }
+  });
 }
 
 // ---- the protected exit ---------------------------------------------------------------------
@@ -567,7 +571,7 @@ function workLine(item: WorkItem): string {
 
 const exitDialog: ExitDialog = {
   async confirm(items, intent) {
-    const restart = intent === "restart-update";
+    const restart = intent !== "quit";
     const { response } = await dialog.showMessageBox({
       type: "warning",
       title: T.exitBusyTitle,
@@ -782,8 +786,6 @@ interface Prefs {
   quickChatKey?: string;
   /** The proxy for the model providers (`http://host:port`, `socks5://host:port`); absent means none. */
   proxy?: string;
-  /** The relay hosts the plugin reported (its `config.baseURL`), kept on NO_PROXY with the default relay. */
-  relayHosts?: string[];
 }
 const PREFS_DEFAULT: Prefs = { openAtLogin: false, menuBar: true, quickChat: true };
 /** ⌥ Space on macOS as in Muse; Ctrl+Alt+Space where Alt+Space is the window menu. */
@@ -810,21 +812,16 @@ function prefsPath(): string {
 }
 
 function readPrefs(): Prefs {
-  try {
-    const raw = JSON.parse(readFileSync(prefsPath(), "utf8")) as Partial<Prefs>;
-    return { ...PREFS_DEFAULT, ...(typeof raw === "object" && raw ? raw : {}) };
-  } catch {
-    return PREFS_DEFAULT;
-  }
+  return readPrivateJson(prefsPath(), (raw) =>
+    typeof raw === "object" && raw ? { ...PREFS_DEFAULT, ...(raw as Partial<Prefs>) } : undefined,
+  ) ?? PREFS_DEFAULT;
 }
 
 function writePrefs(next: Prefs = prefs, strict = false): void {
   try {
     mkdirSync(harnessHome(), { recursive: true });
-    // the proxy address may carry `user:pass@`: the file is the owner's alone, like cloud.json and
-    // hands.json next to it (`mode` applies to a new file only, so an existing one is tightened too)
-    writeFileSync(prefsPath(), `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
-    chmodSync(prefsPath(), 0o600);
+    // The proxy address may carry `user:pass@`, so both the replacement and backup are private.
+    writePrivateJson(prefsPath(), next);
   } catch (exc) {
     if (strict) throw exc;
     log(`prefs: could not save: ${String(exc)}`);
@@ -835,7 +832,7 @@ function writePrefs(next: Prefs = prefs, strict = false): void {
 function showWindow(): BrowserWindow | null {
   if (!mainWindow && hostUrl) {
     mainWindow = createWindow();
-    void mainWindow.loadURL(hostUrl);
+    void loadHost(mainWindow, hostUrl);
   }
   if (!mainWindow) return null;
   if (mainWindow.isMinimized()) mainWindow.restore();
@@ -993,9 +990,7 @@ function registerBridge(): void {
   // macOS applies Screen Recording only to freshly started processes: after granting it, the
   // process that takes the screenshots has to start again — the helper when it is in use,
   // the whole app otherwise.
-  ipcMain.handle("nanomuse:relaunch", () => {
-    relaunchNow();
-  });
+  ipcMain.handle("nanomuse:relaunch", () => relaunchNow());
   ipcMain.handle("nanomuse:updates:snapshot", () => windowsUpdates?.snapshot() ?? null);
   ipcMain.handle("nanomuse:updates:auto-download", async (_e, enabled: boolean) => {
     await windowsUpdates?.setAutoDownload(enabled);
@@ -1037,10 +1032,6 @@ function registerBridge(): void {
         const { proxy: _drop, ...rest } = prefs;
         const url = validProxyUrl(patch.proxy);
         prefs = !patch.proxy.trim() ? rest : url ? { ...rest, proxy: url } : prefs;
-      }
-      if (Array.isArray(patch.relayHosts)) {
-        // the relay the plugin talks to, so a self-hosted one is on NO_PROXY as well
-        prefs = { ...prefs, relayHosts: patch.relayHosts.filter((h): h is string => typeof h === "string" && h.trim() !== "").slice(0, 8) };
       }
       writePrefs();
       applyPrefs();
@@ -1723,19 +1714,26 @@ let relaunching = false;
  * `nanomuse mcp` — started before the permission was granted, and so still without it —
  * does not outlive the relaunch.
  */
-function relaunchNow(): void {
+async function relaunchNow(): Promise<boolean> {
   // with a helper bundle the helper is what restarts — also while it is between two processes
   // or failed to start (then this is the retry); in 0.1.38 a restart that found the helper
   // "not running" fell through here and relaunched the whole app, twice when clicked twice
   if (helper()?.present()) {
     log("permissions: restarting the helper for the new grant");
-    void macHelper?.restart();
-    return;
+    const restarted = await macHelper?.restart();
+    if (!restarted) throw new Error(macHelper?.failure() || "the helper could not restart");
+    return true;
   }
-  if (relaunching) return;
-  relaunching = true;
-  app.relaunch();
-  app.quit();
+  if (relaunching) return true;
+  if (!exitGuard) return false;
+  return exitGuard.requestRestart("relaunch", () => {
+    relaunching = true;
+    app.relaunch();
+    app.quit();
+  }, true).then((accepted) => {
+    if (!accepted) relaunching = false;
+    return accepted;
+  });
 }
 
 let screenGrantWatch: NodeJS.Timeout | null = null;
@@ -1781,7 +1779,7 @@ function watchScreenGrant(): void {
         cancelId: 1,
       })
       .then(({ response }) => {
-        if (response === 0) relaunchNow();
+        if (response === 0) return relaunchNow();
       })
       .catch(() => undefined);
   }, 1500);
@@ -1844,8 +1842,9 @@ function createWindow(): BrowserWindow {
     if (verdict === "external") void shell.openExternal(url);
   });
   win.webContents.session.setPermissionRequestHandler((_wc, permission, callback, details) => {
-    // the microphone for voice input, for the Host's page alone; nothing else is asked for
-    callback(permission === "media" && sameOrigin(details.requestingUrl, hostUrl));
+    // Dictation receives audio only. Video, mixed capture and cross-origin frames are denied.
+    const media = details as Electron.MediaAccessPermissionRequest;
+    callback(mediaPermissionAllowed(permission, details.requestingUrl, media.securityOrigin, media.mediaTypes, hostUrl));
   });
   win.on("closed", mainWindowClosed);
   // Windows logoff/shutdown may close the last window without before-quit.
@@ -1853,6 +1852,15 @@ function createWindow(): BrowserWindow {
   // the splash: the logo in a loading ring and the wordmark (resources/loading.html) — no face
   void win.loadFile(join(ownResources(), "loading.html"), { query: { lang: zh ? "zh" : "en" } });
   return win;
+}
+
+/**
+ * Show the Host's web app in `win`, then drop the splash from the window's history: a back
+ * press (a mouse's side button too) would otherwise land on loading.html, which never moves on.
+ */
+async function loadHost(win: BrowserWindow, url: string): Promise<void> {
+  await win.loadURL(url);
+  if (!win.isDestroyed()) win.webContents.navigationHistory.clear();
 }
 
 async function boot(): Promise<void> {
@@ -1867,7 +1875,7 @@ async function boot(): Promise<void> {
   log(`ready: ${hostUrl.replace(/token=\S+/, "token=…")}`);
   // the work routes the protected exit asks at quit time (an old plugin answers nothing usable)
   hostWork = new HostWork(hostUrl, { log });
-  await mainWindow?.loadURL(hostUrl);
+  if (mainWindow) await loadHost(mainWindow, hostUrl);
   if (screenshotFlag && mainWindow) {
     // the web app loads its plugins after the document; give it a moment
     await new Promise((r) => setTimeout(r, 8000));

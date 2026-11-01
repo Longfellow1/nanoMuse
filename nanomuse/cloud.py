@@ -18,12 +18,9 @@ import httpx
 from nanomuse import __version__
 
 CLOUD_KEY = "NANOMUSE_CLOUD_KEY"
-# The relay's defaults (contract C4): one model for the chat, one for the hands — the GUI
-# operator wants a model that sees pictures and grounds well, the chat wants a fast,
-# cheap one with tools. Two settings; the relay's ``for`` field on each model says which
-# it is meant for, and these are the fallbacks when the relay does not say.
-DEFAULT_CHAT_MODEL = "deepseek-v4.1-flash"
-DEFAULT_GUI_MODEL = "qwen3.8-27b"
+# The hosted relay has one multimodal model for both chat and GUI operation.
+DEFAULT_CHAT_MODEL = "Qwen/Qwen3.6-27B-FP8"
+DEFAULT_GUI_MODEL = DEFAULT_CHAT_MODEL
 DEFAULT_MODEL = DEFAULT_CHAT_MODEL
 
 MESSAGES = {
@@ -40,6 +37,7 @@ MESSAGES = {
     "out_of_tokens": "This account has used its tokens.",
     "account_disabled": "This account is disabled.",
     "model_not_offered": "That model is not offered here.",
+    "hosted_media_retired": "nanoMuse Cloud no longer generates pictures or clips. Add your own image or video provider and API key under Models.",
     "rate_limited": "Too many requests; slow down a little.",
     "allowance_exhausted": "The free allowance is used up. Invite a friend (the relay adds to both your allowances) or add your own model key; your sign-in and your devices keep working either way.",
     "daily_cap": "Today's token quota is used up; it comes back tomorrow.",
@@ -102,9 +100,14 @@ class CloudClient:
         await self._client.aclose()
 
     async def _request(
-        self, method: str, path: str, body: dict[str, Any] | None = None, token: str | None = None
+        self,
+        method: str,
+        path: str,
+        body: dict[str, Any] | None = None,
+        token: str | None = None,
+        headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        headers = {}
+        headers = dict(headers or {})
         tok = self.api_key if token is None else token
         if tok:
             headers["Authorization"] = f"Bearer {tok}"
@@ -212,6 +215,61 @@ class CloudClient:
     async def delete_samples(self) -> int:
         data = await self._request("DELETE", "/v1/me/samples")
         return int(data.get("deleted") or 0)
+
+    # ---------------------------------------------------------- the record (relay 0.29–0.31)
+    async def post_turn(
+        self, turn: dict[str, Any], headers: dict[str, str] | None = None
+    ) -> dict[str, Any]:
+        """A turn this runtime ran on a key of the person's own, kept beside the Cloud ones
+        (``POST /v1/turns``; docs/cloud.md "The record"). ``headers`` are the
+        ``X-NanoMuse-*`` of the call (the device; the platform the user agent would not say)."""
+        return await self._request("POST", "/v1/turns", turn, headers=headers)
+
+    async def post_events(
+        self, events: list[dict[str, Any]], headers: dict[str, str] | None = None
+    ) -> dict[str, Any]:
+        """What happened around turns, as codes and numbers (``POST /v1/events``, relay 0.31;
+        docs/cloud.md "Client events")."""
+        return await self._request("POST", "/v1/events", {"events": events}, headers=headers)
+
+    async def has_blob(self, sha256: str) -> bool:
+        """Whether the relay already holds this file (``HEAD /v1/blobs/{sha256}``)."""
+        try:
+            response = await self._client.head(
+                f"{self.base_url}/v1/blobs/{sha256}",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+            )
+        except httpx.HTTPError as exc:
+            raise CloudError(0, "offline", f"Cannot reach {self.base_url}: {exc}") from None
+        return response.status_code == 200
+
+    async def put_blob(self, sha256: str, mime: str, data: bytes) -> dict[str, Any]:
+        """A picture, audio or clip of a turn, stored once by its hash (``PUT /v1/blobs/{sha256}``)."""
+        try:
+            response = await self._client.put(
+                f"{self.base_url}/v1/blobs/{sha256}",
+                content=data,
+                headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": mime},
+            )
+        except httpx.TimeoutException:
+            raise CloudError(0, "timeout", f"{self.base_url} did not answer in time") from None
+        except httpx.HTTPError as exc:
+            raise CloudError(0, "offline", f"Cannot reach {self.base_url}: {exc}") from None
+        if response.status_code >= 400:
+            try:
+                err = (response.json() or {}).get("error") or {}
+            except ValueError:
+                err = {}
+            raise CloudError(
+                response.status_code,
+                str(err.get("code") or f"http_{response.status_code}"),
+                str(err.get("message") or response.text[:200]),
+            )
+        try:
+            out = response.json()
+        except ValueError:
+            out = {}
+        return out if isinstance(out, dict) else {}
 
     async def sessions(self) -> list[dict[str, Any]]:
         data = await self._request("GET", "/v1/me/sessions")

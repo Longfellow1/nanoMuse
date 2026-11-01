@@ -20,6 +20,9 @@ from nanomuse_cloud.identifiers import BadIdentifier, parse
 from nanomuse_cloud.senders import LogSender
 from nanomuse_cloud.service import Cloud, CloudError
 
+# the tests call the models as one of the apps would; `apps_only` (0.28) refuses other software
+APP_UA = {"User-Agent": "nanoMuse/0.0 (tests)"}
+
 PNG_1PX = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
 
 
@@ -45,6 +48,10 @@ WAY_FACTS = {
 def fake_upstream() -> FastAPI:
     up = FastAPI()
     up.state.requests = []
+    up.state.chat_503s = 0
+    up.state.chat_delay_s = 0.0
+    up.state.chat_active = 0
+    up.state.chat_active_max = 0
 
     # what the provider lists under the key: chat and picture models, and the spoken / heard /
     # embedded ones the catalog leaves out (ids only, as Model Studio's compatible mode gives them)
@@ -76,6 +83,16 @@ def fake_upstream() -> FastAPI:
     async def chat(request: Request):
         body = await request.json()
         up.state.requests.append(("chat", dict(request.headers), body))
+        up.state.chat_active += 1
+        up.state.chat_active_max = max(up.state.chat_active_max, up.state.chat_active)
+        try:
+            if up.state.chat_delay_s:
+                await asyncio.sleep(up.state.chat_delay_s)
+        finally:
+            up.state.chat_active -= 1
+        if up.state.chat_503s:
+            up.state.chat_503s -= 1
+            return JSONResponse(status_code=503, content={"error": {"message": "temporarily unavailable"}})
         if body.get("model") == "boom":
             return JSONResponse(status_code=500, content={"error": {"message": "upstream exploded"}})
         if body.get("model") in up.state.retired:
@@ -227,15 +244,18 @@ def stack():
         upstream_base="http://upstream/compat/v1",
         upstream_key="sk-upstream",
         dashscope_base="http://upstream/ds/api/v1",
+        dashscope_key="sk-dashscope",
         signup_tokens=1000,
         daily_cap_tokens=100_000,
         per_minute_requests=100,
+        chat_concurrency=2,
+        chat_retry_base_s=0,
         public_base="http://cloud.test",
     )
     sender = LogSender()
     cloud = Cloud(settings, Database(":memory:"), sender)
     app = create_app(settings, cloud, upstream_transport=httpx.ASGITransport(app=up))
-    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://cloud.test")
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://cloud.test", headers=APP_UA)
     return app, client, sender, up, cloud
 
 
@@ -260,6 +280,95 @@ def test_identifiers():
     for bad in ("", "12345", "not an address", "@x.com", "1234567890123456789"):
         with pytest.raises(BadIdentifier):
             parse(bad)
+
+
+async def test_hosted_default_is_one_multimodal_chat_model_and_retires_media(monkeypatch):
+    monkeypatch.delenv("CLOUD_MODELS")
+    monkeypatch.delenv("CLOUD_MEDIA_ENABLED")
+    settings = Settings(
+        database=":memory:",
+        secret="test-secret",
+        upstream_base="http://upstream/compat/v1",
+        upstream_key="sk-upstream",
+        public_base="http://cloud.test",
+    )
+    assert [m.id for m in settings.models] == ["Qwen/Qwen3.6-27B-FP8"]
+    assert settings.models[0].input_modalities == ("text", "image")
+    assert settings.models[0].recommended_lanes == ("chat", "gui")
+    assert settings.models[0].price_in == 3.0 and settings.models[0].price_out == 12.0
+    up = fake_upstream()
+    sender = LogSender()
+    cloud = Cloud(settings, Database(":memory:"), sender)
+    app = create_app(settings, cloud, upstream_transport=httpx.ASGITransport(app=up))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://cloud.test", headers=APP_UA) as client:
+        me = await sign_up(client, sender)
+        headers = {"Authorization": f"Bearer {me['api_key']}"}
+        listed = (await client.get("/v1/models", headers=headers)).json()["data"]
+        assert [m["id"] for m in listed] == ["Qwen/Qwen3.6-27B-FP8"]
+        caller = cloud.authenticate(me["api_key"])
+        cloud.db.insert_video_task("old-task", caller.account_id, "wan2.2-i2v-flash", cost_uy=500_000, probe=False)
+        before = list(up.state.requests)
+        usage_before = (await client.get("/v1/me", headers=headers)).json()["usage"]
+        retired_model = await client.get("/v1/models/qwen-image-3.0-pro?kind=image", headers=headers)
+        assert retired_model.status_code == 410
+        assert retired_model.json()["error"]["code"] == "hosted_media_retired"
+        responses = (
+            await client.post(
+                "/v1/images/generations",
+                headers=headers,
+                json={"model": "qwen-image-3.0", "prompt": "a dragon"},
+            ),
+            await client.post(
+                "/v1/images/edits",
+                headers=headers,
+                data={"model": "qwen-image-3.0", "prompt": "wave"},
+                files={"image": ("dragon.png", PNG_1PX, "image/png")},
+            ),
+            await client.post(
+                "/api/v1/services/aigc/video-generation/video-synthesis",
+                headers=headers,
+                json={"model": "wan2.2-i2v-flash", "input": {"prompt": "a wave"}},
+            ),
+            await client.get(
+                "/api/v1/uploads",
+                headers=headers,
+                params={"action": "getPolicy", "model": "wan2.2-i2v-flash"},
+            ),
+            await client.get("/api/v1/tasks/old-task", headers=headers),
+        )
+        for response in responses:
+            assert response.status_code == 410
+            assert response.json()["error"]["code"] == "hosted_media_retired"
+            assert response.json()["error"]["action"] == "configure_own_provider"
+        estimate = await client.get("/v1/estimate?images=1&clips=1", headers=headers)
+        assert estimate.status_code == 410
+        assert await app.state.settle_video_tasks() == 0
+        assert up.state.requests == before
+        assert (await client.get("/v1/me", headers=headers)).json()["usage"] == usage_before
+
+
+async def test_retired_media_is_hidden_when_an_old_environment_still_lists_it():
+    settings = Settings(
+        database=":memory:",
+        secret="test-secret",
+        upstream_base="http://upstream/compat/v1",
+        upstream_key="sk-upstream",
+        public_base="http://cloud.test",
+        media_enabled=False,
+    )
+    expected = [m.id for m in settings.models if m.kind == "chat"]
+    assert expected and any(m.kind != "chat" for m in settings.models)
+    up = fake_upstream()
+    sender = LogSender()
+    cloud = Cloud(settings, Database(":memory:"), sender)
+    app = create_app(settings, cloud, upstream_transport=httpx.ASGITransport(app=up))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://cloud.test", headers=APP_UA) as client:
+        assert (await client.get("/healthz")).json()["models"] == expected
+        signed_in = await sign_up(client, sender)
+        headers = {"Authorization": f"Bearer {signed_in['api_key']}"}
+        assert [m["id"] for m in signed_in["models"]] == expected
+        assert [m["id"] for m in (await client.get("/v1/me", headers=headers)).json()["models"]] == expected
+        assert [m["id"] for m in (await client.get("/v1/models", headers=headers)).json()["data"]] == expected
 
 
 async def test_signup_grants_and_lists_models(stack):
@@ -378,6 +487,47 @@ async def test_chat_is_relayed_and_charged(stack):
     err = r.json()["error"]
     assert err["code"] == "upstream_500" and "exploded" not in err["message"] and "exploded" in err["upstream"]
     assert cloud.me(cloud.authenticate(data["api_key"]))["tokens"]["used"] == used
+
+
+async def test_chat_bursts_are_queued_and_transient_refusals_are_retried(stack):
+    app, client, sender, up, cloud = stack
+    data = await sign_up(client, sender)
+    headers = {"Authorization": f"Bearer {data['api_key']}"}
+    body = {"model": "qwen3.8-flash", "messages": [{"role": "user", "content": "hi"}]}
+
+    up.state.chat_503s = 2
+    before = len([row for row in up.state.requests if row[0] == "chat"])
+    r = await client.post("/v1/chat/completions", headers=headers, json=body)
+    assert r.status_code == 200 and r.headers["x-nanomuse-charged"] == "45"
+    assert len([row for row in up.state.requests if row[0] == "chat"]) - before == 3
+    assert cloud.db.events_since(0).get("upstream.error", 0) == 0
+
+    up.state.chat_delay_s = 0.02
+    rs = await asyncio.gather(*(client.post("/v1/chat/completions", headers=headers, json=body) for _ in range(4)))
+    assert all(r.status_code == 200 for r in rs)
+    assert up.state.chat_active_max == 2
+    health = (await client.get("/v1/admin/health", headers={"X-Admin-Token": "admin"})).json()
+    assert health["chat_upstream"] == {"active": 0, "waiting": 0, "limit": 2, "retries": 2}
+
+
+async def test_stream_retries_only_before_output_starts(stack):
+    app, client, sender, up, cloud = stack
+    data = await sign_up(client, sender)
+    headers = {"Authorization": f"Bearer {data['api_key']}"}
+    up.state.chat_503s = 1
+    before = len([row for row in up.state.requests if row[0] == "chat"])
+
+    async with client.stream(
+        "POST",
+        "/v1/chat/completions",
+        headers=headers,
+        json={"model": "qwen3.8-27b", "stream": True, "messages": [{"role": "user", "content": "hi"}]},
+    ) as r:
+        body = (await r.aread()).decode()
+
+    assert r.status_code == 200 and "data: [DONE]" in body and "你好" in body
+    assert len([row for row in up.state.requests if row[0] == "chat"]) - before == 2
+    assert cloud.db.events_since(0).get("upstream.error", 0) == 0
 
 
 async def test_stream_refused_upstream_is_not_charged(stack):
@@ -518,11 +668,15 @@ async def test_pictures_are_drawn_a_couple_at_a_time(stack):
     accounts = (await client.get("/v1/admin/accounts", headers={"X-Admin-Token": "admin"})).json()["accounts"]
     await client.post("/v1/admin/grant", headers={"X-Admin-Token": "admin"}, json={"account_id": accounts[0]["id"], "tokens": 1_000_000})
     in_flight = {"now": 0, "peak": 0}
+    # the provider answers nobody until the test says so: the four admitted requests cannot
+    # settle and free a slot before the two refused ones have been counted, however slow
+    # the runner (a timed sleep here let a sixth request in after the first had finished)
+    release = asyncio.Event()
 
     async def slow(request: Request):
         in_flight["now"] += 1
         in_flight["peak"] = max(in_flight["peak"], in_flight["now"])
-        await asyncio.sleep(0.05)
+        await release.wait()
         in_flight["now"] -= 1
         return {"output": {"choices": [{"message": {"content": [{"image": "http://upstream/pic.png"}]}}]}}
 
@@ -532,12 +686,19 @@ async def test_pictures_are_drawn_a_couple_at_a_time(stack):
     ]
     up.add_api_route("/ds/api/v1/services/aigc/multimodal-generation/generation", slow, methods=["POST"])
 
-    rs = await asyncio.gather(
-        *(
+    tasks = [
+        asyncio.ensure_future(
             client.post("/v1/images/generations", headers=headers, json={"model": "qwen-image-3.0", "prompt": f"dragon {i}"})
-            for i in range(6)
         )
-    )
+        for i in range(6)
+    ]
+    # the two turned away at the door are the only ones that can finish before the release
+    for _ in range(500):
+        if sum(t.done() for t in tasks) >= 2:
+            break
+        await asyncio.sleep(0.01)
+    release.set()
+    rs = await asyncio.gather(*tasks)
     # four of one account's requests may be under way at once (MAX_IN_FLIGHT); the two
     # over that are told so rather than queued
     assert sorted(r.status_code for r in rs) == [200] * 4 + [429] * 2
@@ -568,6 +729,7 @@ async def test_images_go_through_dashscope_native(stack):
     assert base64.b64decode(r.json()["data"][0]["b64_json"]) == PNG_1PX
     kind, up_headers, up_body = up.state.requests[-1]
     assert kind == "image" and up_body["model"] == "qwen-image-3.0"
+    assert up_headers["authorization"] == "Bearer sk-dashscope"
     assert up_body["parameters"] == {"size": "1024*1024", "watermark": False, "prompt_extend": False}
     assert up_body["input"]["messages"][0]["content"] == [{"text": "a small dragon"}]
     assert r.headers["x-nanomuse-charged"] == "30000"
@@ -603,6 +765,7 @@ async def test_unconfigured_upstream_holds_nothing(stack):
     # account was refused with too_many_in_flight until the holds timed out.
     app, client, sender, up, cloud = stack
     object.__setattr__(app.state.settings, "upstream_key", "")
+    object.__setattr__(app.state.settings, "dashscope_key", "")
     data = await sign_up(client, sender)
     headers = {"Authorization": f"Bearer {data['api_key']}"}
     account_id = cloud.authenticate(data["api_key"]).account_id
@@ -636,7 +799,7 @@ def make_stack(**overrides):
     sender = LogSender()
     cloud = Cloud(settings, Database(":memory:"), sender)
     app = create_app(settings, cloud, upstream_transport=httpx.ASGITransport(app=up))
-    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://cloud.test")
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://cloud.test", headers=APP_UA)
     return app, client, sender, up, cloud
 
 
@@ -825,6 +988,9 @@ def test_prices_and_day_boundary():
     img = s.model("qwen-image-3.0")
     assert s.model("qwen-image-3.0-pro") is img  # what 0.1.21 phones still ask for
     assert s.model("MiniMax/MiniMax-H3") is None and s.model("nope") is None
+    replacement = type(s.models[0])(id="replacement", name="Replacement", upstream="provider-model")
+    switched = Settings(models=(replacement,), model_aliases={"old-provider-model": "replacement"})
+    assert switched.model("old-provider-model") is replacement
     assert img.image_cost_uy("1024*1024") == 180_000 and img.image_cost_uy("2048x2048") == 180_000 and img.image_cost_uy(None) == 180_000
     vid = s.model("wan2.2-i2v-flash")
     assert vid.video_cost_uy(5) == 500_000 and vid.video_cost_uy(vid.clip_seconds) == 500_000 and vid.video_cost_uy(0) == 0
@@ -861,7 +1027,7 @@ async def test_video_is_relayed_under_dashscope_paths(stack):
     r = await client.get("/api/v1/uploads", params={"action": "getPolicy", "model": "wan2.2-i2v-flash"}, headers=headers)
     assert r.status_code == 200 and r.json()["data"]["upload_dir"] == "tmp/x"
     kind, up_headers, q = up.state.requests[-1]
-    assert kind == "uploads" and up_headers["authorization"] == "Bearer sk-upstream" and q["model"] == "wan2.2-i2v-flash"
+    assert kind == "uploads" and up_headers["authorization"] == "Bearer sk-dashscope" and q["model"] == "wan2.2-i2v-flash"
     r = await client.post(
         "/api/v1/services/aigc/video-generation/video-synthesis",
         headers={**headers, "X-DashScope-OssResourceResolve": "enable"},
@@ -870,7 +1036,7 @@ async def test_video_is_relayed_under_dashscope_paths(stack):
     assert r.status_code == 200 and r.json()["output"]["task_id"] == "task-42"
     kind, up_headers, up_body = up.state.requests[-1]
     assert kind == "video" and up_headers["x-dashscope-async"] == "enable" and up_headers["x-dashscope-ossresourceresolve"] == "enable"
-    assert up_headers["authorization"] == "Bearer sk-upstream" and up_body["model"] == "wan2.2-i2v-flash"
+    assert up_headers["authorization"] == "Bearer sk-dashscope" and up_body["model"] == "wan2.2-i2v-flash"
     assert (await client.get("/v1/me", headers=headers)).json()["tokens"]["used"] == 0  # nothing until the clip exists
 
     # Polling: still running, then done — charged once, however often it is asked again.
@@ -913,7 +1079,7 @@ async def test_unlimited_relay_meters_but_never_refuses():
     sender = LogSender()
     cloud = Cloud(settings, Database(":memory:"), sender)
     app = create_app(settings, cloud, upstream_transport=httpx.ASGITransport(app=up))
-    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://cloud.test")
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://cloud.test", headers=APP_UA)
     data = await sign_up(client, sender)
     assert data["tokens"]["unlimited"] is True and data["tokens"]["granted"] == 0
     headers = {"Authorization": f"Bearer {data['api_key']}"}
@@ -1332,16 +1498,15 @@ async def test_the_catalog_asks_each_model_whether_it_answers_and_sees():
 
 
 async def test_the_thinking_default_follows_what_the_request_already_says():
-    """The shipped default (`enable_thinking: false`) saves reasoning tokens — but an app that
-    sets a thinking level sends `reasoning_effort`, and Model Studio refuses that next to
-    `enable_thinking: false`. The relay reads what the request says about reasoning, in any
-    of the dialects, and sets the default accordingly."""
+    """Model Studio and vLLM use different switches; neither default may override the app."""
     from nanomuse_cloud.api import apply_chat_defaults, thinking_requested
 
     d = {"enable_thinking": False}
     for body, wants in (
         ({}, None),
         ({"enable_thinking": True}, True),
+        ({"chat_template_kwargs": {"enable_thinking": True}}, True),
+        ({"chat_template_kwargs": {"enable_thinking": False}}, False),
         ({"thinking": {"type": "enabled"}}, True),
         ({"thinking": {"type": "disabled"}}, False),
         ({"thinking": True}, True),
@@ -1366,6 +1531,29 @@ async def test_the_thinking_default_follows_what_the_request_already_says():
     explicit: dict = {"enable_thinking": True, "reasoning_effort": "low"}
     apply_chat_defaults(explicit, d)
     assert explicit == {"enable_thinking": True, "reasoning_effort": "low"}
+
+    # A Qwen model behind vLLM reads the switch from its chat template kwargs. Defaults
+    # under that object merge with caller kwargs and follow a generic reasoning choice.
+    template_defaults = {"chat_template_kwargs": {"enable_thinking": False, "foo": "default"}}
+    template_silent: dict = {"model": "m"}
+    apply_chat_defaults(template_silent, template_defaults)
+    assert template_silent["chat_template_kwargs"] == {"enable_thinking": False, "foo": "default"}
+    template_effort: dict = {
+        "reasoning_effort": "medium",
+        "chat_template_kwargs": {"foo": "caller"},
+    }
+    apply_chat_defaults(template_effort, template_defaults)
+    assert template_effort["chat_template_kwargs"] == {
+        "enable_thinking": True,
+        "foo": "caller",
+    }
+    assert template_defaults["chat_template_kwargs"]["enable_thinking"] is False
+    template_off: dict = {
+        "chat_template_kwargs": {"enable_thinking": False},
+        "reasoning_effort": "high",
+    }
+    apply_chat_defaults(template_off, template_defaults)
+    assert template_off["reasoning_effort"] == "none"
 
     # end to end: the request that used to come back 400 goes through
     app, client, sender, up, cloud = make_stack(catalog_probe=False)
@@ -1392,6 +1580,12 @@ async def test_an_upstream_refusal_is_written_down_with_the_providers_words():
     )
     assert upstream_detail("chat", 502, "m", b"<html>bad gateway</html>") == "chat 502 m"
     assert upstream_detail("chat", 400, "m", b'{"message": "plain\\nlines"}') == "chat 400 m: plain lines"
+    # Gemini's OpenAI-compatible endpoint wraps its error in a list
+    gemini = b'[{"error":{"code":400,"message":"Unknown name \\"store\\": Cannot find field.","status":"INVALID_ARGUMENT"}}]'
+    assert upstream_detail("chat", 400, "gemini-3.1-flash-lite", gemini) == (
+        'chat 400 gemini-3.1-flash-lite: Unknown name "store": Cannot find field.'
+    )
+    assert upstream_detail("chat", 400, "m", b"[]") == "chat 400 m"
 
     app, client, sender, up, cloud = make_stack(catalog_probe=False)
     data = await sign_up(client, sender, identifier="13800138000", device="pixel")
@@ -1433,6 +1627,11 @@ def test_a_content_check_refusal_is_said_plainly():
     # an ordinary 400 still passes the provider's own words through, as before
     assert relay_error_body(400, other)["error"] == {"message": "Model not exist.", "type": "upstream", "code": "upstream_400"}
     assert relay_error_body(429, other)["error"]["code"] == "upstream_busy"
+    # a 400 wrapped in a list (Gemini's OpenAI-compatible endpoint) passes its words through too,
+    # instead of the generic sentence that sent people hunting for a key (#611)
+    gemini = b'[{"error":{"code":400,"message":"Unknown name \\"store\\": Cannot find field.","status":"INVALID_ARGUMENT"}}]'
+    assert relay_error_body(400, gemini)["error"]["message"] == 'Unknown name "store": Cannot find field.'
+    assert relay_error_body(400, b"[1, 2]")["error"]["message"] == "The model provider refused the request"
 
 
 async def test_a_content_check_refusal_is_counted_apart_from_upstream_errors(stack):
@@ -1685,8 +1884,19 @@ async def test_data_controls_keep_the_training_view_only_and_are_deletable(stack
     assert first["request"][2] == {"role": "tool", "tool_call_id": "c1", "content": "", "omitted": True}
     dumped = json.dumps(first)
     assert "AAAA" not in dumped and "Ada" not in dumped and "SECRET" not in dumped
-    # 0.10: the address goes with the turn for the operator (the test client has none)
-    assert first["meta"] == {"ua": "nanoMuse-Android/0.1.27", "lang": "zh-CN", "ip": first["meta"]["ip"]}
+    # 0.10: the address goes with the turn for the operator (the test client has none);
+    # 0.31: the kept turn says where it came from — the relay's model (`cloud`), the record's
+    # id for it, the script of what the person wrote — and nothing of who started it when
+    # the app did not say (no X-NanoMuse-Run header here)
+    assert first["meta"] == {
+        "ua": "nanoMuse-Android/0.1.27",
+        "lang": "zh-CN",
+        "ip": first["meta"]["ip"],
+        "source": "cloud",
+        "turn_id": first["meta"]["turn_id"],
+        "script": "latin",
+    }
+    assert len(first["meta"]["turn_id"]) == 16 and "run" not in first["meta"]
     assert first["platform"] == "android"
     assert first["prompt_tokens"] == 100 and first["completion_tokens"] == 50
     account = (await client.get(f"/v1/admin/accounts/{data['account']['id']}", headers=admin)).json()["account"]
@@ -1700,10 +1910,13 @@ async def test_data_controls_keep_the_training_view_only_and_are_deletable(stack
     assert len(dv["days"]) == 7 and dv["days"][-1]["samples"] == 2 and dv["days"][-1]["turned_on"] == 1 and dv["days"][-1]["accounts"] == 1
     assert len(dv["by_model"]) == 1 and dv["by_model"][0]["model"] == "qwen3.8-27b" and dv["by_model"][0]["samples"] == 2
     assert dv["by_model"][0]["tokens"] == dv["period"]["prompt_tokens"] + dv["period"]["completion_tokens"] > 0
+    # each split counts the calls and the questions among them (0.31): the Android call came
+    # after a tool's result, so it continued a question; the streamed one opened its own
     assert sorted(dv["by_platform"], key=lambda x: x["platform"]) == [
-        {"platform": "android", "samples": 1},
-        {"platform": "other", "samples": 1},
+        {"platform": "android", "samples": 1, "turns": 0},
+        {"platform": "runtime", "samples": 1, "turns": 1},
     ]
+    assert dv["totals"]["turns"] == 1 and dv["period"]["turns"] == 1 and dv["totals"]["turns_pending"] == 0
     assert [s["response"] for s in dv["recent"]] == ["你好，世界", "hi"] and dv["recent"][0]["hint"] == data["account"]["hint"]
     # the export has no account ids
     r = await client.get("/v1/admin/samples/export", headers=admin)
@@ -1717,9 +1930,15 @@ async def test_data_controls_keep_the_training_view_only_and_are_deletable(stack
     r = await client.post("/v1/chat/completions", headers=headers, json={"model": "qwen3.8-27b", "messages": msgs})
     assert (await client.get("/v1/admin/samples", headers=admin)).json()["total"] == 2
     assert (await client.get("/v1/me", headers=headers)).json()["contribute"]["samples"] == 2
+    # 0.29: the same tap deletes the record — every turn (the four made here, whatever the
+    # switch said) and the one picture only this account referenced
+    await asyncio.gather(*app.state.record_tasks)
+    me = (await client.get("/v1/me", headers=headers)).json()
+    assert me["contribute"]["record"] == {"on": True, "turns": 4, "own": 0, "files": 1, "media_bytes": 3, "keep_days": 0}
     r = await client.delete("/v1/me/samples", headers=headers)
-    assert r.json() == {"deleted": 2}
+    assert r.json() == {"deleted": 2, "turns": 4, "files": 1}
     assert (await client.get("/v1/me", headers=headers)).json()["contribute"]["samples"] == 0
+    assert (await client.get("/v1/me", headers=headers)).json()["contribute"]["record"]["turns"] == 0
     kinds = [e["kind"] for e in (await client.get("/v1/me/events", headers=headers)).json()["events"]]
     assert {"contribute.on", "contribute.off", "contribute.deleted"} <= set(kinds) and "contribute.default" not in kinds
     dv = (await client.get("/v1/admin/data?days=1", headers=admin)).json()
@@ -2171,7 +2390,8 @@ async def test_the_menu_says_which_lane_each_model_is_for(stack, monkeypatch):
     assert ds["name"] == "DeepSeek V4.1 Flash" and ds["architecture"]["input_modalities"] == ["text", "image"]
     assert ds["nanomuse"]["price_cny"]["per_m_input"] == 2.0 and ds["nanomuse"]["price_cny"]["per_m_output"] == 8.0
     assert ds["nanomuse"]["in_mult"] == 0.7 and ds["nanomuse"]["out_mult"] == 0.7
-    assert [m.id for m in DEFAULT_MODELS][:2] == ["deepseek-v4.1-flash", "qwen3.8-27b"]
+    assert [m.id for m in DEFAULT_MODELS] == ["Qwen/Qwen3.6-27B-FP8"]
+    assert DEFAULT_MODELS[0].recommended_lanes == ("chat", "gui")
     assert menu_warnings(DEFAULT_MODELS) == []  # exactly one recommended per lane
 
     # the lanes come from CLOUD_MODELS under the JSON name `for`

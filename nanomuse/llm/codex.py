@@ -23,7 +23,7 @@ from loguru import logger
 
 from nanomuse import __version__
 from nanomuse.config import DEFAULT_DATA_DIR, LLMSettings
-from nanomuse.llm.base import BaseLLM, DeltaCallback
+from nanomuse.llm.base import BaseLLM, DeltaCallback, begin_call, end_call
 from nanomuse.llm.chatgpt import (
     DEFAULT_MODEL,
     ORIGINATOR,
@@ -105,6 +105,9 @@ def to_codex(body: dict[str, Any]) -> dict[str, Any]:
     """A Chat Completions request body → the Codex Responses body (always streaming)."""
     instructions: list[str] = []
     items: list[dict[str, Any]] = []
+    call_id_counts: dict[str, int] = {}
+    used_call_ids: set[str] = set()
+    pending_outputs: dict[str, list[str]] = {}
     for m in body.get("messages") or []:
         if not isinstance(m, dict):
             continue
@@ -128,21 +131,36 @@ def to_codex(body: dict[str, Any]) -> dict[str, Any]:
                 if not isinstance(call, dict):
                     continue
                 fn = _obj(call.get("function"))
+                raw_id = str(call.get("id") or "")
+                wire_id = raw_id[:64]
+                occurrence = call_id_counts.get(wire_id, 0) + 1
+                while True:
+                    suffix = "" if occurrence == 1 else f"-{occurrence}"
+                    call_id = f"{wire_id[: 64 - len(suffix)]}{suffix}"
+                    if call_id not in used_call_ids:
+                        break
+                    occurrence += 1
+                call_id_counts[wire_id] = occurrence
+                used_call_ids.add(call_id)
+                pending_outputs.setdefault(raw_id, []).append(call_id)
                 items.append(
                     {
                         "type": "function_call",
-                        "call_id": str(call.get("id") or ""),
+                        "call_id": call_id,
                         "name": str(fn.get("name") or call.get("name") or ""),
                         "arguments": _arguments(fn.get("arguments")),
                     }
                 )
         elif role == "tool":
+            raw_id = str(m.get("tool_call_id") or "")
+            queued = pending_outputs.get(raw_id)
+            call_id = queued.pop(0) if queued else raw_id[:64]
             content = m.get("content")
             output = content if isinstance(content, str) else _arguments(content)
             items.append(
                 {
                     "type": "function_call_output",
-                    "call_id": str(m.get("tool_call_id") or ""),
+                    "call_id": call_id,
                     "output": output,
                 }
             )
@@ -575,6 +593,7 @@ class CodexLLM(BaseLLM):
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str = "auto",
         on_delta: DeltaCallback | None = None,
+        on_reasoning_delta: DeltaCallback | None = None,
         max_tokens: int | None = None,
     ) -> LLMResponse:
         with_images = has_images(messages) and self.vision_available is not False
@@ -592,6 +611,9 @@ class CodexLLM(BaseLLM):
         codex_body = to_codex(body)
         if self.settings.extra_body:
             codex_body.update(self.settings.extra_body)
+        # a turn on the person's own sign-in: counted in its turn and, when the runtime is
+        # signed in to nanoMuse Cloud, sent up to the account's record afterwards
+        call = begin_call(None)
         state = StreamState(model=self.model)
         try:
             async for event in self.client.events(codex_body):
@@ -599,6 +621,8 @@ class CodexLLM(BaseLLM):
                     delta = chunk["choices"][0]["delta"]
                     if on_delta and delta.get("content"):
                         on_delta(str(delta["content"]))
+                    if on_reasoning_delta and delta.get("reasoning_content"):
+                        on_reasoning_delta(str(delta["reasoning_content"]))
                 if state.done:
                     break
         except UpstreamError as exc:
@@ -607,7 +631,7 @@ class CodexLLM(BaseLLM):
             raise RuntimeError(f"ChatGPT: {exc.message}") from exc
         if state.error:
             raise RuntimeError(f"ChatGPT: {state.error['message']}")
-        return LLMResponse(
+        response = LLMResponse(
             content="".join(state.content).strip() or None,
             tool_calls=[
                 ToolCall(
@@ -623,6 +647,8 @@ class CodexLLM(BaseLLM):
             usage=dict(state.usage),
             model=self.model,
         )
+        end_call(call, settings=self.settings, params=body, response=response)
+        return response
 
 
 __all__ = [

@@ -34,6 +34,8 @@ timeout_ms = 30000
 
 `NANOMUSE_BROWSER_ENABLED=1` switches the tool on; `NANOMUSE_BROWSER_BACKEND` picks the backend. On the phone (`NANOMUSE_DEVICE=android`) the tool is on by default.
 
+A program that embeds the runtime and brings a browser of its own (a remote browser service, say) does not need a third setting: it gives the `Browser` tool a `backend_factory`, a callable returning a `BrowserBackend` (`nanomuse/tools/browser_backends.py`, the interface the two built-in backends implement). A new session then takes that backend instead of Playwright or the phone, and from there nothing differs: the same actions drive it, the app shows its frames and can take it over, `close` and the tool's cleanup close it, and the Sentinel sees every URL before it is opened. Until the first session the app is told the kind `custom`; after that, the backend's own `kind`. The factory is asked again only after its backend was closed, so one session keeps one backend.
+
 ## What the agent can do
 
 The tool's actions, identical on both backends:
@@ -52,6 +54,11 @@ The tool's actions, identical on both backends:
 | `fetch url [method] [body]` | an HTTP request with the browser's cookies, no page rendered: an order list as JSON, an `.ics` behind a login, a form post |
 | `profile name` | present as `mobile` (412×915, a phone's user agent) or `desktop` (1280×900), or a custom user agent and size |
 | `close` | close the page; the profile and its cookies stay |
+
+`navigate` accepts public HTTP and HTTPS destinations only. It checks the initial host and
+the final URL after navigation, so `localhost`, private addresses and a public URL that
+redirects into the local network are refused. The Playwright backend also repeats the check
+immediately before browser requests continue, narrowing the DNS check-to-connect window.
 
 Every action that changes the page sends a frame to the chat: a JPEG of the page, its title and URL, and a caption of what just happened ("Clicked 'Sign in'"). Frames are the size of the profile's viewport in CSS pixels, so a point on the picture is the same point on the page; the take-over relies on that. They stay in memory on the server for the session; the last dozen per chat.
 

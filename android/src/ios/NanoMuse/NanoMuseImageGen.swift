@@ -6,8 +6,8 @@
 //  key on this phone (an OpenAI-compatible provider whose base URL is on
 //  dashscope / aliyuncs), the face is drawn with that key through Model
 //  Studio's native multimodal endpoint — the compatible endpoint answers 404
-//  to image models. Otherwise through nanoMuse Cloud, where a cost estimate
-//  is shown first. Android: avatar/ImageGen.kt.
+//  to image models. A self-hosted relay can also be used when its live menu
+//  explicitly advertises image generation. Android: avatar/ImageGen.kt.
 //
 
 import Foundation
@@ -26,6 +26,7 @@ enum NanoMuseImageGen {
     enum Route: Equatable {
         case ownKey(OwnKey)
         case relay
+        case unavailable
     }
 
     struct Failure: LocalizedError {
@@ -58,8 +59,8 @@ extension NanoMuseImageGen {
     private static let defaultsPreferRelayKey = "nanomuse.avatar.prefer_relay"
     private static let defaultsRelayModelKey = "nanomuse.avatar.relay_model"
 
-    /// The person chose nanoMuse Cloud for pictures (Settings › Models, or the older Image &
-    /// video models page). An explicit choice: it wins over any key on the phone while signed in.
+    /// The person chose a relay that advertises pictures (Settings › Models, or the older Image &
+    /// video models page). An explicit choice wins over any key on the phone while signed in.
     static var preferRelay: Bool {
         get { UserDefaults.standard.bool(forKey: defaultsPreferRelayKey) }
         set { UserDefaults.standard.set(newValue, forKey: defaultsPreferRelayKey) }
@@ -71,14 +72,14 @@ extension NanoMuseImageGen {
         return s.isEmpty ? nil : s
     }
 
-    /// Pictures through nanoMuse Cloud from now on, with `model` when the person picked one.
+    /// Pictures through the configured relay from now on, with `model` when the person picked one.
     @MainActor
     static func useRelay(model: String? = nil) {
         preferRelay = true
         UserDefaults.standard.set(model?.trimmingCharacters(in: .whitespaces) ?? "", forKey: defaultsRelayModelKey)
     }
 
-    /// The relay's image model for the next picture: the one picked, else the first the menu lists.
+    /// The relay's image model for the next picture: the one picked, else the first its menu lists.
     @MainActor
     static func relayImageModel() async throws -> String {
         if let model = relayModel { return model }
@@ -131,16 +132,18 @@ extension NanoMuseImageGen {
 
     /// Where the next picture is drawn (0.1.41, the contract's section 3): the person's choice
     /// first; without one, the chat provider's own image model when the chat runs on a key of
-    /// their own that draws, then nanoMuse Cloud when signed in, then the first key on the
-    /// phone that draws. Cloud no longer loses to a Bailian key the person did not pick, and a
-    /// Bailian key the person did pick is never passed over for Cloud. `.relay` when nothing
-    /// can draw: the relay call then says *Sign in to nanoMuse Cloud first*.
+    /// their own that draws, then a signed-in relay whose live menu advertises pictures, then
+    /// the first key on the phone that draws. A relay never jumps ahead of a provider the
+    /// person picked.
     @MainActor
     static func route() -> Route {
         let candidates = bailianInstances()
-        guard let resolved = NanoMuseModelSlots.imageValue() else { return .relay }
+        guard let resolved = NanoMuseModelSlots.imageValue() else { return .unavailable }
+        if resolved.providerId == NanoMuseCloud.instance?.id {
+            return NanoMuseCloud.modelsOn ? .relay : .unavailable
+        }
         guard let inst = candidates.first(where: { $0.id == resolved.providerId }),
-              let key = ProviderKeychainHelper.loadAPIKey(instanceId: inst.id), !key.isEmpty else { return .relay }
+              let key = ProviderKeychainHelper.loadAPIKey(instanceId: inst.id), !key.isEmpty else { return .unavailable }
         let model = resolved.model.isEmpty ? suggestedModel(for: inst) : resolved.model
         return .ownKey(OwnKey(instanceId: inst.id, label: inst.label, baseURL: inst.customBaseURL ?? "", apiKey: key, model: model))
     }
@@ -176,8 +179,8 @@ extension NanoMuseImageGen {
     }
 
     /// Back to the automatic order for pictures (the *Automatic* entry of the picker): no key
-    /// and no Cloud preference stored, so `route()` follows the chat provider, then Cloud, then
-    /// the first key that draws.
+    /// and no relay preference stored, so `route()` follows the chat provider, then a relay
+    /// that advertises pictures, then the first key that draws.
     @MainActor
     static func clearChoice() {
         for key in [defaultsInstanceKey, defaultsModelKey, defaultsPreferRelayKey, defaultsRelayModelKey] {
@@ -191,6 +194,7 @@ extension NanoMuseImageGen {
         switch route() {
         case .relay: return String(format: AppLocalized("Drawn by %@"), NanoMuseCloud.label)
         case .ownKey(let k): return String(format: AppLocalized("Drawn by %@ · %@"), k.label, k.model)
+        case .unavailable: return AppLocalized("No image model found on this provider. Type one below, or check again once the key is in.")
         }
     }
 
@@ -206,6 +210,8 @@ extension NanoMuseImageGen {
             var parameters: [String: Any] = ["size": "1024*1024", "watermark": false]
             if k.model.hasPrefix("qwen-image") { parameters["prompt_extend"] = false }
             return try await callDashScope(k, model: k.model, content: [["text": prompt]], parameters: parameters, what: "generation")
+        case .unavailable:
+            throw Failure(message: AppLocalized("No image model found on this provider. Type one below, or check again once the key is in."))
         }
     }
 
@@ -231,6 +237,8 @@ extension NanoMuseImageGen {
                 ["text": prompt],
             ]
             return try await callDashScope(k, model: model, content: content, parameters: parameters, what: "edit")
+        case .unavailable:
+            throw Failure(message: AppLocalized("No image model found on this provider. Type one below, or check again once the key is in."))
         }
     }
 

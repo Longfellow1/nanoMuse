@@ -1,5 +1,7 @@
 package io.github.nanomuse.ui.avatar
 
+import androidx.annotation.DrawableRes
+import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.RepeatMode
@@ -60,6 +62,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -70,6 +73,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -77,14 +81,31 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.openminis.app.R
 import com.openminis.app.agent.SoulStore
+import io.github.nanomuse.avatar.AvatarExport
 import io.github.nanomuse.avatar.AvatarStore
 import io.github.nanomuse.avatar.AvatarStudio
 import io.github.nanomuse.avatar.ImageGen
 import io.github.nanomuse.ui.home.MuseTones
 import io.github.nanomuse.ui.home.avatarDiscColor
 import io.github.nanomuse.ui.sysfiles.MuseTopBar
+import kotlinx.coroutines.launch
 
 const val ROUTE_AVATAR_STUDIO = "nanomuse/avatar"
+
+private data class AvatarPreset(
+    @StringRes val name: Int,
+    @StringRes val description: Int,
+    @StringRes val styleLabel: Int,
+    val style: AvatarStudio.Style,
+    @DrawableRes val preview: Int,
+)
+
+private val avatarPresets = listOf(
+    AvatarPreset(R.string.nm_avatar_preset_moss_name, R.string.nm_avatar_preset_moss_description, R.string.nm_avatar_style_muse, AvatarStudio.Style.MUSE, R.drawable.nm_preset_moss_courier),
+    AvatarPreset(R.string.nm_avatar_preset_tide_name, R.string.nm_avatar_preset_tide_description, R.string.nm_avatar_style_clay, AvatarStudio.Style.CLAY, R.drawable.nm_preset_tide_tinker),
+    AvatarPreset(R.string.nm_avatar_preset_dusk_name, R.string.nm_avatar_preset_dusk_description, R.string.nm_avatar_style_watercolor, AvatarStudio.Style.WATERCOLOR, R.drawable.nm_preset_dusk_moth),
+    AvatarPreset(R.string.nm_avatar_preset_copper_name, R.string.nm_avatar_preset_copper_description, R.string.nm_avatar_style_line, AvatarStudio.Style.LINE, R.drawable.nm_preset_copper_acorn),
+)
 
 /**
  * "Appearance": the page behind a tap on the face. The face as it is now, one sentence and a
@@ -114,6 +135,23 @@ fun AvatarStudioScreen(onBack: () -> Unit, onOpenSoul: () -> Unit, onOpenMediaMo
     val ownMoods by io.github.nanomuse.avatar.OwnClip.moods.collectAsState()
     val clipChooser = rememberOwnClipChooser()
     OwnClipChooserHost(clipChooser)
+    // *Save to gallery* (#664): the face's files are in the app's own storage, which no file
+    // manager opens; this copies them to Pictures and Movies under nanoMuse/avatar.
+    val scope = rememberCoroutineScope()
+    var exporting by remember { mutableStateOf(false) }
+    fun exportToGallery() {
+        if (exporting) return
+        exporting = true
+        scope.launch {
+            val result = AvatarExport.export(context)
+            exporting = false
+            val text = when {
+                result == null || result.total == 0 -> context.getString(R.string.nm_avatar_export_failed)
+                else -> context.getString(R.string.nm_avatar_export_done, result.pictures, result.clips)
+            }
+            android.widget.Toast.makeText(context, text, android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
     val generating = slots.any { it is AvatarStudio.Slot.Loading }
     // Read each time: the media page may have changed it while this screen was below it.
     val endpoint = ImageGen.endpoint(context)
@@ -157,6 +195,13 @@ fun AvatarStudioScreen(onBack: () -> Unit, onOpenSoul: () -> Unit, onOpenMediaMo
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.nm_own_clip_default)) },
                                 onClick = { menu = false; io.github.nanomuse.avatar.OwnClip.clear() },
+                            )
+                        }
+                        if (current != null || ownClip != null || ownMoods.isNotEmpty()) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.nm_avatar_menu_export)) },
+                                enabled = !exporting,
+                                onClick = { menu = false; exportToGallery() },
                             )
                         }
                         if (current != null) {
@@ -247,6 +292,38 @@ fun AvatarStudioScreen(onBack: () -> Unit, onOpenSoul: () -> Unit, onOpenMediaMo
                     Text(stringResource(R.string.nm_avatar_describe_title), fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
                     Spacer(Modifier.height(4.dp))
                     Text(stringResource(R.string.nm_avatar_describe_body), fontSize = 13.sp, lineHeight = 18.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(12.dp))
+                    Text(stringResource(R.string.nm_avatar_preset_ai), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(6.dp))
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        items(avatarPresets.size) { i ->
+                            val preset = avatarPresets[i]
+                            val presetName = stringResource(preset.name)
+                            val presetDescription = stringResource(preset.description)
+                            val presetStyle = stringResource(preset.styleLabel)
+                            val selectedPreset = description == presetDescription
+                            Surface(
+                                onClick = {
+                                    description = presetDescription
+                                    style = preset.style
+                                },
+                                shape = RoundedCornerShape(18.dp),
+                                border = if (selectedPreset) BorderStroke(3.dp, MuseTones.action) else null,
+                                color = MuseTones.fill,
+                            ) {
+                                Column(Modifier.width(112.dp).padding(bottom = 8.dp)) {
+                                    Image(
+                                        painter = painterResource(preset.preview),
+                                        contentDescription = stringResource(R.string.nm_avatar_preset_a11y, i + 1, presetName, presetStyle),
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.size(112.dp),
+                                    )
+                                    Text(presetName, Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                    Text(presetStyle, Modifier.fillMaxWidth().padding(horizontal = 8.dp), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                                }
+                            }
+                        }
+                    }
                     Spacer(Modifier.height(12.dp))
                     OutlinedTextField(
                         value = description,

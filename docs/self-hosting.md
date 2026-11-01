@@ -33,13 +33,24 @@ bash scripts/self-host.sh
 The script asks five things: the domain (or `local`), an e-mail for Let's Encrypt, how sign-in codes go out, the provider's URL and key, the admin password. It writes `cloud/.env` with a fresh random `CLOUD_SECRET`, starts `docker compose`, waits for `/healthz` and prints the console and admin URLs. Running it again keeps the secrets and the accounts and only re-asks, with the current values as defaults. For this machine only, no domain and no TLS:
 
 ```bash
-bash scripts/self-host.sh --local          # http://127.0.0.1:8787, codes in the relay's log
-bash scripts/self-host.sh --local --bind 0.0.0.0   # reachable from the phones on the same network
+bash scripts/self-host.sh --local          # this machine only: http://127.0.0.1:8787, codes in the relay's log
+bash scripts/self-host.sh --local --bind 0.0.0.0   # the phones on the same network too: the URLs carry this machine's LAN address
 ```
 
-By hand instead of the script: `cd cloud && cp .env.example .env`, fill in `CLOUD_DOMAIN`, `PUBLIC_BASE`, `ACME_EMAIL`, `CLOUD_SECRET`, `CLOUD_ADMIN_TOKEN`, `UPSTREAM_KEY` and the sender settings, then `docker compose up -d`; or, without Caddy, `docker compose -f docker-compose.yml -f docker-compose.local.yml up -d`. The relay runs as uid 10001 inside its container, and `cloud/data`, the bind-mounted data directory, must belong to that uid on the host: `mkdir -p data && sudo chown -R 10001:10001 data` before the first start, and once more when upgrading from a relay whose image ran as root (the script does this for you; a relay that cannot write the directory says so at start and stops).
+With `--bind 0.0.0.0` the relay listens on every interface and the script looks up the machine's LAN address (`192.168.1.20`, say) for `PUBLIC_BASE`, the invitation links and the URLs it prints, since that is the address the phones reach it at; when it cannot find one it says so and falls back to `127.0.0.1`. `--bind` with one address (a Tailscale address, for instance) publishes the port on that address only and uses it as given. Running the script again with another `--bind` moves the URLs along.
+
+By hand instead of the script: `cd cloud && cp .env.example .env`, fill in `CLOUD_DOMAIN`, `PUBLIC_BASE`, `ACME_EMAIL`, `CLOUD_SECRET`, `CLOUD_ADMIN_TOKEN`, `UPSTREAM_KEY` and the sender settings, then `docker compose up -d`; or, without Caddy, `docker compose -f docker-compose.yml -f docker-compose.local.yml up -d`, with `RELAY_BIND=0.0.0.0` (or the machine's address) and `PUBLIC_BASE=http://<that address>:8787` in `cloud/.env` when other machines are to reach it. The relay runs as uid 10001 inside its container, and `cloud/data`, the bind-mounted data directory, must belong to that uid on the host: `mkdir -p data && sudo chown -R 10001:10001 data` before the first start, and once more when upgrading from a relay whose image ran as root (the script does this for you; a relay that cannot write the directory says so at start and stops).
+
+Chat may use a different OpenAI-compatible provider while pictures and clips stay on
+Model Studio: put the chat endpoint and key in `UPSTREAM_BASE` / `UPSTREAM_KEY`, and
+the Model Studio native endpoint and key in `DASHSCOPE_BASE` / `DASHSCOPE_KEY`.
+`DASHSCOPE_KEY` falls back to `UPSTREAM_KEY` when it is empty. If the change replaces
+the chat menu, `CLOUD_MODEL_ALIASES` can map ids saved by existing clients to a model
+in `CLOUD_MODELS`, for example `{"old-chat-model":"new-chat-model"}`.
 
 ### Sign-in codes
+
+After `--local`, the script prints a *Codes* command that starts with `cd cloud &&`. Copy it from the repository root; it includes both compose files used for the local relay.
 
 A code goes out every time someone signs in. `CODE_SENDER` says how:
 
@@ -118,5 +129,7 @@ cp .env.example .env && $EDITOR .env      # a model key, NANOMUSE_SERVER_TOKEN; 
 nanomuse config init                      # or copy config/config.example.toml to config/config.toml
 docker compose up -d app                  # the web app on http://<host>:8787, the URL with its token in the logs
 ```
+
+If your local relay already uses port 8787, put `NANOMUSE_RUNTIME_PORT=8788` in the root `.env` before starting the app, then open it on port 8788. This changes the app's host port only; the container still listens on 8787. See [deployment.md](deployment.md#docker).
 
 The container sees only its data volume and `./workspace`; capabilities are dropped. Keeping it running, a published image for arm64, and reaching it from outside your network are in [deployment.md](deployment.md). The runtime signs in to a relay like any other device (yours, from section 2, if you set `NANOMUSE_CLOUD_BASE_URL`), and then the phone can hand it tasks over the hub like a computer that is always on ([every-device.md](every-device.md)).

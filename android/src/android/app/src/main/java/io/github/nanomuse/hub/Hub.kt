@@ -29,7 +29,7 @@ object Hub {
     private const val KEY_NAME = "hub.name"
     private const val KEY_REMOTE_CONTROL = "hub.remote_control"
 
-    val ACTIONS = listOf("info", "shell", "files", "file.get", "file.put", "open", "screen", "notify", "task", "approve", "stop")
+    val ACTIONS = listOf("info", "shell", "files", "file.get", "file.put", "open", "screen", "notify", "task", "approve", "stop", "approve.any")
 
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -106,6 +106,7 @@ object Hub {
             onProfile = { frame -> io.github.nanomuse.cloud.ProfileSync.onFrame(app, frame) },
             onSync = { frame -> io.github.nanomuse.sync.ConversationSync.onFrame(app, frame) },
             onWorking = { frame -> io.github.nanomuse.sync.ConversationSync.onWorkingFrame(app, frame) },
+            onPush = { frame -> ComputerCards.onPush(app, frame) },
         )
         client = c
         c.start()
@@ -138,8 +139,28 @@ object Hub {
                 .put("kind", "phone")
                 .put("os", "Android ${Build.VERSION.RELEASE}")
                 .put("version", VERSION)
-                .put("actions", JSONArray(ACTIONS)),
+                .put("actions", JSONArray(ACTIONS))
+                .also { d -> helloLlm(context)?.let { d.put("llm", it) } },
         )
+
+    /** `[A-Za-z0-9._:/-]{1,80}` and no scheme: what the hello's `llm` ids may be (docs/hub.md). */
+    private val LLM_ID = Regex("^[A-Za-z0-9._:/-]{1,80}$")
+
+    /**
+     * Relay 0.28, optional: the ids this phone runs its chats under — `cloud` for the relay's
+     * models, else the catalogue id of the person's own key (nothing for an endpoint the
+     * catalogue does not know) — and the model id. Plain ids only; never a key or a URL. The
+     * operator's console counts them in aggregate. Null when either id is missing or not plain.
+     */
+    private fun helloLlm(context: Context): JSONObject? {
+        val entry = io.github.nanomuse.models.ModelSlots.chatEntry(context) ?: return null
+        val inst = io.github.nanomuse.models.ModelSlots.chatInstance(context) ?: return null
+        val provider = if (io.github.nanomuse.models.ModelSlots.isCloud(context, inst)) "cloud"
+        else io.github.nanomuse.models.ModelSlots.catalogueOf(context, inst)?.id ?: return null
+        val model = entry.model.id
+        if (!LLM_ID.matches(provider) || !LLM_ID.matches(model) || "://" in provider || "://" in model) return null
+        return JSONObject().put("provider", provider).put("model", model)
+    }
 
     // ── calls out ──────────────────────────────────────────────────────────
 

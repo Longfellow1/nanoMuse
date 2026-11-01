@@ -92,7 +92,8 @@ export interface HarnessBridge {
   reveal?(path: string): Promise<void>
   onQuickChat?(listener: () => void): () => void
   // since 0.1.33
-  relaunch?(): Promise<void>
+  // New shells report whether the restart completed; older shells return void.
+  relaunch?(): Promise<boolean | void>
   // since 0.1.34
   guidePermissions?(): Promise<Record<PermissionKind, PermissionState>>
   setContentProtection?(on: boolean): Promise<void>
@@ -112,8 +113,9 @@ export function gatedPermissions(): boolean {
   return bridge()?.platform === 'darwin'
 }
 
-/** Open a link the way the shell prefers: the person's browser, never a window of ours. */
+/** Open a link the way the shell prefers: the person's browser, never a window of ours. Web addresses only; the shell checks again on its side. */
 export function openLink(url: string): void {
+  if (!/^https?:\/\/[^/\s]/.test(url)) return
   const b = bridge()
   if (b) void b.openExternal(url)
   else window.open(url, '_blank', 'noopener')

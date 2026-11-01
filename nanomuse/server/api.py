@@ -88,7 +88,7 @@ from nanomuse.fences import MAX_NAME
 from nanomuse.hub.client import HubError
 from nanomuse.llm.chatgpt import ChatGPTError
 from nanomuse.logger import logger
-from nanomuse.server import tickets
+from nanomuse.server import data_export, tickets
 from nanomuse.server.channels_api import install_channels
 from nanomuse.server.events import MAIN_THREAD
 from nanomuse.server.service import MuseService, goal_to_dict
@@ -120,6 +120,18 @@ class SendBody(BaseModel):
 
 class ThreadBody(BaseModel):
     title: str = ""
+
+
+class FeedbackBody(BaseModel):
+    """A thumb on a reply (``event`` + ``vote`` ``up``/``down``/"" to take it back, and
+    ``reason`` when the person said: ``wrong``, ``unhelpful``, ``unsafe``, ``slow``,
+    ``other``), or why Stop was pressed (``stop_reason``: ``wrong``, ``slow``,
+    ``changed_mind``, ``done``, ``other``, ``skipped``). Either, not both."""
+
+    event: str = Field("", max_length=64)
+    vote: str = Field("", max_length=8)
+    reason: str = Field("", max_length=16)
+    stop_reason: str = Field("", max_length=16)
 
 
 class FeedInstructionsBody(BaseModel):
@@ -173,7 +185,7 @@ class ReminderBody(BaseModel):
 
 
 class TriggerBody(BaseModel):
-    kind: str = Field(pattern="^(mail|event|hook)$")
+    kind: str = Field(pattern="^(mail|event|hook|device)$")
     text: str = Field(min_length=1, max_length=2000)
     match: str = Field(default="", max_length=200)
     lead_minutes: int = Field(default=30, ge=0, le=1440)
@@ -276,7 +288,8 @@ class EmbeddingsBody(BaseModel):
 
 
 class SearchBody(BaseModel):
-    provider: str | None = None  # duckduckgo | brave | tavily | serply | you | searxng
+    # duckduckgo | brave | tavily | serply | you | parallel | keenable | searxng
+    provider: str | None = None
     api_key: str | None = None  # into the vault; "" removes it; None keeps it
     base_url: str | None = None  # SearXNG instance
 
@@ -599,6 +612,24 @@ def create_app(settings: Settings, service: MuseService | None = None) -> FastAP
         _thread_or_404(thread_id)
         return {"ok": svc.stop_thread(thread_id)}
 
+    @app.post("/api/threads/{thread_id}/feedback", dependencies=dep)
+    async def thread_feedback(thread_id: str, body: FeedbackBody) -> dict[str, Any]:
+        """The lightest feedback: a thumb up or down beside a reply, or the reason for a
+        Stop. Kept with the conversation; told to the account's record when signed in."""
+        _thread_or_404(thread_id)
+        try:
+            if body.stop_reason:
+                svc.stop_reason(thread_id, body.stop_reason)
+                return {"ok": True}
+            if not body.event:
+                raise HTTPException(400, "event or stop_reason")
+            ev = svc.feedback(thread_id, body.event, body.vote, body.reason)
+            return {"ok": True, "event": ev}
+        except KeyError:
+            raise HTTPException(404, "no such event") from None
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
+
     @app.post("/api/threads/{thread_id}/clear", dependencies=dep)
     async def clear_thread(thread_id: str) -> dict[str, Any]:
         _thread_or_404(thread_id)
@@ -831,7 +862,8 @@ def create_app(settings: Settings, service: MuseService | None = None) -> FastAP
             "mail": "A test: you pressed Run now, as if a matching mail had just arrived (none did)",
             "event": "A test: you pressed Run now, as if a matching event were about to start",
             "hook": "A test: you pressed Run now, as if the webhook had been called (empty body)",
-        }[item.kind]
+            "device": "A test: you pressed Run now, as if the device had just come online (it did not)",
+        }.get(item.kind, "A test: you pressed Run now")
         try:
             fired = svc.fire_trigger(
                 trigger_id, what=what, key=f"test:{secrets.token_hex(4)}", title="test run"
@@ -1626,10 +1658,20 @@ def create_app(settings: Settings, service: MuseService | None = None) -> FastAP
     async def import_contacts(
         request: Request, name: str = Query("", max_length=40)
     ) -> dict[str, Any]:
-        """The text of a ``.vcf`` file as the request body (no multipart needed; 16 MB max)."""
-        raw = await request.body()
-        if len(raw) > 16 * 1024 * 1024:
+        """The text of a ``.vcf`` file as the request body (no multipart needed; 16 MB max,
+        checked as it arrives: a larger file is refused before it is all in memory)."""
+        limit = 16 * 1024 * 1024
+        declared = request.headers.get("content-length", "")
+        if declared.isdigit() and int(declared) > limit:
             raise HTTPException(413, "the file is larger than 16 MB")
+        chunks: list[bytes] = []
+        total = 0
+        async for chunk in request.stream():
+            total += len(chunk)
+            if total > limit:
+                raise HTTPException(413, "the file is larger than 16 MB")
+            chunks.append(chunk)
+        raw = b"".join(chunks)
         try:
             return await conn.import_contacts(name, raw.decode("utf-8", errors="replace"))
         except ValueError as exc:
@@ -1924,6 +1966,21 @@ def create_app(settings: Settings, service: MuseService | None = None) -> FastAP
             return svc.save_upload(name, b"".join(chunks)).model_dump()
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
+
+    @app.get("/api/data/export", dependencies=dep_or_signed)
+    async def export_data() -> Response:
+        """The agent's data as one zip (parity note 37): what the runtime keeps about the
+        person and about its own work, and never a credential. The reply is the file itself,
+        so a browser on another machine gets it and nothing is written to this disk."""
+        data = await asyncio.to_thread(data_export.agent_data_zip, svc.settings.data_dir)
+        return Response(
+            data,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="{data_export.filename()}"',
+                "Cache-Control": "private, no-store",
+            },
+        )
 
     @app.get("/api/files/{path:path}", dependencies=dep_or_signed)
     async def get_file(path: str, download: bool = False) -> Response:

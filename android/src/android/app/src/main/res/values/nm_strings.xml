@@ -132,6 +132,9 @@
     <string name="nm_routine_paused">Off</string>
     <!-- The chat row a routine sent: its label and the clock time it fired -->
     <string name="nm_routine_wake_caption">Routine · %1$s · %2$s</string>
+    <!-- One scheduled task, several times a day (GH#557) -->
+    <string name="nm_scheduled_task_add_time">Add another time</string>
+    <string name="nm_scheduled_task_runs_scheduled_for">Scheduled for %1$s</string>
 
     <!-- Ideas tab -->
     <string name="nm_ideas_title">Ideas</string>
@@ -317,6 +320,9 @@
     <string name="nm_avatar_menu_model">Image model</string>
     <string name="nm_avatar_menu_regenerate_moods">Redraw the moods</string>
     <string name="nm_avatar_menu_reset">Back to the built-in face</string>
+    <string name="nm_avatar_menu_export">Save to gallery</string>
+    <string name="nm_avatar_export_done">Saved to the gallery under nanoMuse/avatar: pictures %1$d, clips %2$d</string>
+    <string name="nm_avatar_export_failed">Nothing could be saved to the gallery</string>
     <string name="nm_avatar_mood_idle">At rest</string>
     <string name="nm_avatar_mood_working">Working</string>
     <string name="nm_avatar_mood_waiting">Waiting for you</string>
@@ -328,6 +334,16 @@
     <string name="nm_avatar_retry">Retry</string>
     <string name="nm_avatar_describe_title">Describe a new face</string>
     <string name="nm_avatar_describe_body">One sentence is enough: what it is, what it wears, what it feels like. Pick a style, and your image model draws four to choose from.</string>
+    <string name="nm_avatar_preset_moss_name">Moss Courier</string>
+    <string name="nm_avatar_preset_moss_description">a tiny moss-covered courier with leaf ears and an unmarked canvas satchel</string>
+    <string name="nm_avatar_preset_tide_name">Tide Tinker</string>
+    <string name="nm_avatar_preset_tide_description">a seafoam axolotl tinkerer with coral frills and a plain tool pouch</string>
+    <string name="nm_avatar_preset_dusk_name">Dusk Moth</string>
+    <string name="nm_avatar_preset_dusk_description">a thoughtful indigo moth with peach wing spots, a cream collar and round glasses</string>
+    <string name="nm_avatar_preset_copper_name">Copper Acorn</string>
+    <string name="nm_avatar_preset_copper_description">a small acorn-shaped copper automaton with sage panels and a muted-blue scarf</string>
+    <string name="nm_avatar_preset_a11y">Option %1$d: %2$s, %3$s</string>
+    <string name="nm_avatar_preset_ai">AI-generated inspiration</string>
     <string name="nm_avatar_default_description">A chubby pale-yellow baby dragon with tiny orange horns and small folded wings</string>
     <string name="nm_avatar_style_flat">Flat</string>
     <string name="nm_avatar_style_clay">3D clay</string>
@@ -346,7 +362,7 @@
     <string name="nm_avatar_pick_body">You can draw four more any time; the old ones are kept until you do.</string>
     <string name="nm_avatar_use_this">Use this one</string>
     <string name="nm_avatar_use_this_hint">The moods (working, waiting, done, oops) are drawn from it next, in the background.</string>
-    <string name="nm_avatar_footer">Pictures are stored on this phone under minis-global/nanomuse/avatar. Each face costs five images from your provider: one you chose plus four moods.</string>
+    <string name="nm_avatar_footer">Pictures live in the app\'s own storage on this phone, where no file manager can see them. Save to gallery in the menu copies the face, its moods and its clips to Pictures and Movies under nanoMuse/avatar. Each face costs five images from your provider: one you chose plus four moods.</string>
     <string name="nm_own_clip_title">Your own clip</string>
     <string name="nm_own_clip_body">A short video of yours plays as the face at rest, and the other moods fall back to it. MP4 or MOV with H.264 video, up to 15 seconds and 30 MB; it plays muted in a loop.</string>
     <string name="nm_own_clip_on">Your clip is on and plays for every mood; the drawn stills still show where a still is used. Default face removes it.</string>
@@ -602,6 +618,12 @@
     <string name="nm_risk_title_device">Allow “%1$s” to operate this phone?</string>
     <string name="nm_risk_desc_device">“%1$s”, another device on your account, wants to %2$s on this phone. What exactly is shown below. “Always” lets that device do such things here without asking; take it back under Permissions.</string>
     <string name="nm_risk_preview_device">What the device asked</string>
+    <string name="nm_risk_title_scheduled">Allow %1$s to take this step on “%2$s”?</string>
+    <string name="nm_risk_desc_scheduled">The scheduled task “%1$s” is running on “%2$s” and waits for your answer. The step runs there, not on this phone.</string>
+    <string name="nm_risk_desc_scheduled_app">The scheduled task “%1$s” is running on “%2$s” and wants to act in %3$s. It waits for your answer; the step runs there, not on this phone.</string>
+    <string name="nm_risk_preview_scheduled">The step on the computer</string>
+    <string name="nm_risk_allow_task">Always in this task</string>
+    <string name="nm_risk_task_remembered_toast">Kept on “%1$s”: this task stops asking there. Revoke it under Settings → Permissions on that computer.</string>
     <string name="nm_risk_preview_show_all">Show all (%1$d lines)</string>
     <string name="nm_risk_preview_show_less">Show less</string>
     <string name="nm_risk_class_remote">Remote control</string>
@@ -808,16 +830,21 @@
     <string name="nm_cloud_ev_contribute_default">Data controls: on for new accounts</string>
     <string name="nm_data_title">Data controls</string>
     <string name="nm_data_improve">Help improve nanoMuse\'s AI models</string>
-    <string name="nm_data_why">While this is on, the text of your chats with the nanoMuse Cloud models (what you wrote, what it answered and the tools it chose to call) is kept on the relay to train the community\'s own open model. Not your memory or SOUL (the system prompt), not what tools returned, not pictures, and never next to who you are. Your own API key never passes through the relay.</string>
+    <string name="nm_data_why">While this is on, the text of those chats (what you wrote, what the model answered and the tools it chose to call) also joins the training set for the community\'s own open model: without your memory or SOUL (the system prompt), what tools returned, pictures, or who you are. Off, nothing more joins it; the record itself stays until you delete it. Turns on a key of your own are in the record, never in the training set.</string>
+    <string name="nm_data_record_why">nanoMuse Cloud keeps every turn of your chats with its models in full as your account\'s record: what went to the model, what it answered, the tools and what they returned, the pictures as files. From the 1.0.7 app on, turns answered on your own key join it too. It is your data: only your devices and whoever runs the relay can read it.</string>
+    <string name="nm_data_record_held">The record holds %1$d turns of this account (%2$d run on your own keys), with %3$d pictures.</string>
+    <string name="nm_data_record_empty">The record holds nothing of this account yet.</string>
+    <string name="nm_data_record_keep_days">This relay keeps a turn for %1$d days.</string>
+    <string name="nm_data_record_keep_forever">It stays until you delete it.</string>
     <string name="nm_data_default_on">New accounts start with it on.</string>
     <string name="nm_data_default_off">New accounts start with it off.</string>
     <string name="nm_data_kept">%1$d turns kept so far.</string>
     <string name="nm_data_on_toast">On. Turn it off here at any time.</string>
-    <string name="nm_data_off_toast">Off. Nothing more is kept.</string>
-    <string name="nm_data_delete">Delete the kept conversations</string>
-    <string name="nm_data_delete_sub">Removes every turn kept from this account, whether the switch is on or off now. Turning the switch off keeps what was kept until you delete it here.</string>
-    <string name="nm_data_delete_confirm">The kept conversations are removed from the server. This cannot be undone.</string>
-    <string name="nm_data_deleted">%1$d turns deleted.</string>
+    <string name="nm_data_off_toast">Off. Nothing more joins the training set.</string>
+    <string name="nm_data_delete">Delete the record and the kept conversations</string>
+    <string name="nm_data_delete_sub">Removes the record of this account\'s chats and every training turn kept from it, whether the switch is on or off now. Turning the switch off keeps what was kept until you delete it here.</string>
+    <string name="nm_data_delete_confirm">The record of your chats and the kept training turns are removed from the server. This cannot be undone.</string>
+    <string name="nm_data_deleted">Deleted: %1$d turns of the record, %2$d files, %3$d training turns.</string>
     <string name="nm_data_sign_in">Sign in to nanoMuse Cloud to use it.</string>
     <string name="nm_data_privacy">Privacy policy</string>
     <string name="nm_data_status_on">On</string>
@@ -1018,6 +1045,8 @@
     <string name="nm_sync_side_title">Also sync side chats</string>
     <string name="nm_sync_side_sub">Off: side chats stay on this device. On: this device\'s side chats go to the account and the other devices\' side chats come here.</string>
     <string name="nm_sync_working">%1$s is working…</string>
+    <string name="nm_sync_working_step">%1$s is working: %2$s</string>
+    <string name="nm_sync_waiting">%1$s is waiting for you</string>
     <string name="nm_devices_ask">Ask this device</string>
     <string name="nm_devices_ask_hint">Tap a device that is online to write to it from the chat: the message starts with @ and its name, and that device does the work.</string>
     <string name="nm_reach_the_provider">the provider</string>
@@ -1096,7 +1125,6 @@
     <string name="nm_cloud_provider_no_delete">This provider is your nanoMuse Cloud account. Switch it off above to stop using its models; to sign out, open Settings › nanoMuse Cloud.</string>
     <string name="nm_welcome_own_key">Use your own API key instead</string>
     <string name="nm_useit_title">Use it for</string>
-    <string name="nm_useit_body">Pick what this key should handle. nanoMuse Cloud keeps the rest.</string>
     <string name="nm_useit_body_signed_out">Pick what this key should handle.</string>
     <string name="nm_useit_use">Use it</string>
     <string name="nm_useit_not_now">Not now</string>
@@ -1136,4 +1164,45 @@
     <string name="nm_font_scale_medium">Medium</string>
     <string name="nm_font_scale_large">Large</string>
     <string name="nm_font_scale_extra_large">XL</string>
+
+    <!-- nanoMuse: backup choices and the headless run (#560, #561) -->
+    <string name="nm_backup_chat_files">Files in the chats</string>
+    <string name="nm_backup_chat_files_on">Every attachment, offload and workspace file travels with the messages.</string>
+    <string name="nm_backup_chat_files_off">Messages only. The files are listed, not carried; a restore brings the chats back without them. Keeps the package small for a server that refuses large uploads.</string>
+    <string name="nm_backup_hint_too_large">The server refused the package for its size. Most often that is its upload limit (nginx: client_max_body_size); raise it, or back up the chats without their files.</string>
+    <string name="nm_backup_delivery_failed">Delivery failed.</string>
+    <string name="nm_backup_run_needs_passphrase">Encryption is on, and the passphrase is typed on the Backup page; a run from the shell cannot ask for it. Start the backup on the page, or turn encryption off there.</string>
+    <string name="nm_backup_run_started">Backup started from the shell.</string>
+
+    <!-- The line under the typing dots while the model has not said anything yet -->
+    <string name="nm_wait_busy">The model is busy, %1$d s so far</string>
+    <string name="nm_wait_queued">%1$d ahead of you, %2$d s so far</string>
+    <string name="nm_wait_next">You are next, %1$d s so far</string>
+    <!-- The lightest feedback (relay 0.31): two thumbs under a reply, one question after a Stop; codes travel, never the words -->
+    <string name="nm_fb_up">Good reply</string>
+    <string name="nm_fb_down">Not a good reply</string>
+    <string name="nm_fb_why">What was wrong?</string>
+    <string name="nm_fb_reason_wrong">Wrong</string>
+    <string name="nm_fb_reason_unhelpful">Not helpful</string>
+    <string name="nm_fb_reason_unsafe">Should not have done that</string>
+    <string name="nm_fb_reason_slow">Too slow</string>
+    <string name="nm_fb_reason_other">Something else</string>
+    <string name="nm_fb_skip">Skip</string>
+    <string name="nm_fb_thanks">Noted, thanks</string>
+    <string name="nm_stop_why">Why did you stop it?</string>
+    <string name="nm_stop_reason_wrong">It was going wrong</string>
+    <string name="nm_stop_reason_slow">Too slow</string>
+    <string name="nm_stop_reason_changed_mind">Changed my mind</string>
+    <string name="nm_stop_reason_done">It was already done</string>
+    <string name="nm_stop_reason_other">Something else</string>
+    <string name="nm_feed_limit_notice">%1$d of today\'s posts did not fit; the feed takes 12 a day</string>
+
+    <!-- Context maintenance -->
+    <string name="nm_context_compacting">Preparing a shorter context (estimated %1$d / %2$d tokens).</string>
+    <string name="nm_context_compact_deferred">The context could not be shortened. Continuing because it still fits the model window.</string>
+    <string name="nm_context_limit_reached">The context is near the model limit and could not be shortened. Try compacting again or start a new chat.</string>
+    <string name="nm_context_compact_timeout">Compaction timed out after %1$d seconds (%2$d model calls).</string>
+    <string name="nm_context_compact_idle_timeout">Compaction stopped after %1$d seconds without a response (%2$d model calls).</string>
+    <string name="nm_context_compact_no_gain">The summary did not shorten the context. The original content was kept.</string>
+    <string name="nm_context_compact_incomplete">The model did not return a complete summary. The original context was kept.</string>
 </resources>

@@ -3,6 +3,9 @@ package io.github.nanomuse.feed
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
+import android.widget.Toast
 import android.net.Uri
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.Lifecycle
@@ -74,6 +77,7 @@ object FeedFlow {
 
     /** Titles the last feed run wrote, for the notification; cleared once told. */
     @Volatile private var lastWritten: List<String> = emptyList()
+    @Volatile private var lastDroppedByLimit = 0
     @Volatile private var lastWrittenAt = 0L
 
     fun init(context: Context) {
@@ -182,20 +186,57 @@ object FeedFlow {
         ScheduledTaskManager(context).setEnabled(id, enabled)
     }
 
-    /** Called after every completed turn: `nanomuse-feed` blocks become posts. */
+    /**
+     * Called after every completed turn: `nanomuse-feed` blocks become posts.
+     *
+     * A draft is dropped when its title was already posted today or its normalized body
+     * already appears in the posts kept by the store (30 days), so a replayed reply
+     * cannot land again as today's posts. A run that writes nothing and hits no daily
+     * limit leaves the generic completion notice available.
+     */
     fun afterTurn(context: Context, sessionId: String, assistantText: String?) {
         if (assistantText.isNullOrEmpty() || !assistantText.contains("```$BLOCK")) return
+        val parsed = block.findAll(assistantText).mapNotNull { m -> parseDraft(m.groupValues[1]) }.toList()
         val today = FeedStore.posts.value.filter { it.day == SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()) }
-        val drafts = block.findAll(assistantText).mapNotNull { m -> parseDraft(m.groupValues[1]) }
-            .filter { d -> today.none { it.title.equals(d.title.trim().take(80), ignoreCase = true) } }
-            .toList()
-        if (drafts.isEmpty()) return
-        val written = FeedStore.append(drafts)
-        if (written.isNotEmpty() && isFeedSession(context, sessionId)) {
-            AppLogger.info(TAG, "feed run in $sessionId wrote ${written.size} post(s)")
-            lastWritten = written.map { it.title }
-            lastWrittenAt = System.currentTimeMillis()
+        val afterTitle = parsed.filter { d -> today.none { it.title.equals(d.title.trim().take(80), ignoreCase = true) } }
+        val titleDropped = parsed.size - afterTitle.size
+        if (titleDropped > 0) AppLogger.warning(TAG, "feed run dropped $titleDropped draft(s) with a title already posted today")
+        val drafts = dropDuplicateBodies(afterTitle, FeedStore.posts.value)
+        val bodyDropped = afterTitle.size - drafts.size
+        if (bodyDropped > 0) AppLogger.warning(TAG, "feed run dropped $bodyDropped draft(s) with a body already posted")
+        if (drafts.isEmpty()) {
+            if (isFeedSession(context, sessionId)) {
+                lastWritten = emptyList()
+                lastDroppedByLimit = 0
+            }
+            return
         }
+        val result = FeedStore.append(drafts)
+        if (!isFeedSession(context, sessionId)) return
+        if (result.written.isEmpty() && result.droppedByLimit == 0) {
+            lastWritten = emptyList()
+            lastDroppedByLimit = 0
+            AppLogger.warning(TAG, "feed run in $sessionId wrote 0 of ${drafts.size} post(s)")
+            return
+        }
+        AppLogger.info(TAG, "feed run in $sessionId wrote ${result.written.size} post(s), ${result.droppedByLimit} omitted by daily limit")
+        lastWritten = result.written.map { it.title }
+        lastDroppedByLimit = result.droppedByLimit
+        lastWrittenAt = System.currentTimeMillis()
+        if (result.droppedByLimit > 0 && ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+            Handler(Looper.getMainLooper()).post {
+                Toast.makeText(context, context.getString(R.string.nm_feed_limit_notice, result.droppedByLimit), Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    /** A body's shape for duplicate checks: trimmed, with runs of whitespace collapsed. */
+    fun normalizeBody(body: String): String = body.trim().replace(Regex("\\s+"), " ")
+
+    /** Drops drafts whose normalized body is already posted, or already seen earlier in this batch. */
+    fun dropDuplicateBodies(drafts: List<FeedStore.Draft>, existingPosts: List<FeedPost>): List<FeedStore.Draft> {
+        val seen = existingPosts.map { normalizeBody(it.body) }.toMutableSet()
+        return drafts.filter { seen.add(normalizeBody(it.body)) }
     }
 
     /**
@@ -203,13 +244,23 @@ object FeedFlow {
      * completion notice over (true), so the generic "task done" with the model's raw reply never
      * shows. With the app on screen the Feed tab already shows the posts; in the background, and
      * only when the run wrote something, one notification names them and opens the Feed.
+     * When the run wrote nothing, this returns false, so the generic completion notice
+     * shows instead of silence.
      */
     fun notifyIfFeed(context: Context, task: ScheduledTask): Boolean {
         if (task.id != taskId(context)) return false
-        val titles = lastWritten.takeIf { it.isNotEmpty() && System.currentTimeMillis() - lastWrittenAt < 30 * 60_000L } ?: return true
+        val recentRun = System.currentTimeMillis() - lastWrittenAt < 30 * 60_000L
+        val titles = lastWritten.takeIf { recentRun }.orEmpty()
+        val droppedByLimit = lastDroppedByLimit.takeIf { recentRun } ?: 0
+        if (titles.isEmpty() && droppedByLimit == 0) return false
         lastWritten = emptyList()
+        lastDroppedByLimit = 0
         if (ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return true
-        val body = titles.take(3).joinToString(" · ")
+        val titleText = titles.take(3).joinToString(" · ")
+        val body = if (droppedByLimit > 0) {
+            val notice = context.getString(R.string.nm_feed_limit_notice, droppedByLimit)
+            if (titleText.isEmpty()) notice else "$titleText · $notice"
+        } else titleText
         val open = OwnScheme.intent(context, Uri.parse("minis://feed"), flags = 0)
         val pending = PendingIntent.getActivity(
             context,
@@ -270,6 +321,7 @@ object FeedFlow {
                     "Write in the user's language; be concrete and useful (today's follow-ups, things they said they would do, goal progress, something they would enjoy); no clickbait, no filler, nothing you already posted. " +
                     "Use tools only if a post needs a live fact (weather, a price, a date) — at most two quick lookups. Say nothing after the last block.",
             )
+            appendLine("The feed has room for ${FeedStore.remainingCapacity()} more posts today.")
             if (recent.isNotEmpty()) appendLine("Recent titles (do not repeat): ${recent.joinToString(" · ")}")
             appendLine("In ordinary conversation here, answer normally; add a `$BLOCK` block only when the user asks to put something in the feed.")
         }

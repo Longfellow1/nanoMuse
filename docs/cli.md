@@ -41,7 +41,7 @@ One task, then exit. Non-zero exit if the agent fails.
 nanomuse daemon [--interval 3600] [--once]
 ```
 
-Advance every active goal, sleep, repeat. Runs in Sentinel `auto` mode, so pair it with deny rules and a tight `egress_allowlist`. The app's *Background work* switch does the same thing inside `nanomuse serve`, one goal per interval, with updates posted to the chat.
+Advance every active goal in its own one-off session, sleep, repeat; what each pass did is printed here. Runs in Sentinel `auto` mode, so pair it with deny rules and a tight `egress_allowlist`. It is the plain, unattended cousin of the app's *Background work* switch inside `nanomuse serve`: that one picks one goal per interval, runs it in the chat's own context with the chat's Sentinel, posts the progress to the chat and remembers across restarts what it owes ([app.md](app.md#background-work)); the daemon has no chat and no memory of passes, it just runs.
 
 ## Goals
 
@@ -73,10 +73,11 @@ nanomuse triggers list [--all]                                                  
 nanomuse triggers add mail  "Summarise it and draft a reply" --match "landlord"   # a new mail whose sender/subject has every word
 nanomuse triggers add event "Put together a one-page brief"  --match "review" --lead 30   # 30 min before a matching event
 nanomuse triggers add hook  "Check that the site is up"      --match "deploy"    # prints the URL to POST to
+nanomuse triggers add device "Say the phone is back"         --match "pixel"     # a device of the account comes online
 nanomuse triggers cancel t_1a2b3c
 ```
 
-A trigger fires when something happens rather than at a time: `mail` needs the email connector (the running server looks at the inbox every `triggers.mail_poll_minutes`, by IMAP UID, so nothing is replayed and nothing fires twice), `event` needs a calendar feed, `hook` is a URL with a key that any program can `POST` to; the body becomes the agent's context. Each firing is a background run in the chat the trigger was set from, shown in the Feed as *New mail: …*, *Coming up: …* or *Webhook: …*. The mail or the request is handed to the model as data, with the instruction that only your standing text says what to do.
+A trigger fires when something happens rather than at a time: `mail` needs the email connector (the running server looks at the inbox every `triggers.mail_poll_minutes`, by IMAP UID, so nothing is replayed and nothing fires twice), `event` needs a calendar feed, `hook` is a URL with a key that any program can `POST` to; the body becomes the agent's context, and `device` needs this computer on the hub and fires when a device of the account comes online (matched on the words in its name and kind; this computer never announces itself, and the devices already online when the app started are not an arrival). Each firing is a background run in the chat the trigger was set from, shown in the Feed as *New mail: …*, *Coming up: …*, *Webhook: …* or *Device online: …*. The mail or the request is handed to the model as data, with the instruction that only your standing text says what to do.
 
 ## Calendar
 
@@ -187,7 +188,7 @@ nanomuse audit [-n 20] [--json]        # recent decisions, approvals, tool calls
 nanomuse config init [--path config/config.toml] [--force]
 nanomuse config show                   # effective settings, secrets masked
 nanomuse config path                   # which file is in use
-nanomuse doctor [--no-model]           # config, data dir, model, connectors — one screen
+nanomuse doctor [--no-model]           # config, data dir, model, connectors, one screen
 nanomuse version                       # also: nanomuse --version / -V
 nanomuse mcp                           # this computer's screen and hands as an MCP server on stdio, for another host
 ```

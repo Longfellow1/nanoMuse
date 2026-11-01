@@ -8,12 +8,13 @@
 //
 //   - the chat model — OpenMinis' default model group, unchanged;
 //   - the image model — the avatar's four candidates and poses
-//     (NanoMuseImageGen: a Bailian key on this phone, else nanoMuse Cloud);
+//     (NanoMuseImageGen: a Bailian key on this phone, or a relay whose live
+//     menu explicitly advertises an image model);
 //   - the video model — the animated avatar (NanoMuseVideoGen: Model
-//     Studio's asynchronous video API, which nanoMuse Cloud relays too;
-//     Wan 2.2 Flash by default, ¥0.10 a second at 480P).
+//     Studio's asynchronous video API, directly or through a relay that
+//     explicitly advertises a video model).
 //
-//  Unset, the video model follows the image provider — the Cloud account
+//  Unset, the video model follows the image provider — an eligible relay
 //  when the face is drawn through it, a Bailian key when that draws — so a
 //  moving avatar needs no visit here; it can be switched off or moved to
 //  another Model Studio provider. Android: media/MediaModels.kt,
@@ -48,10 +49,11 @@ enum NanoMuseMediaModels {
     // MARK: Video
 
     /// Providers whose host speaks Model Studio's asynchronous video API and hold a key: Model
-    /// Studio itself, and nanoMuse Cloud, which relays those same paths under the account's token.
+    /// Studio itself, and a relay only when its live menu advertises video generation.
     @MainActor
     static func eligibleVideoInstances() -> [ProviderInstance] {
-        let cloudId = NanoMuseCloud.modelsOn ? NanoMuseCloud.instance?.id : nil
+        let cloud = NanoMuseModelSlots.cloudProvider()
+        let cloudId = cloud?.has(.video) == true ? cloud?.id : nil
         return ProviderConfigStore.shared.instances.filter { inst in
             guard inst.isEnabled, inst.credentialType == .apiKey else { return false }
             guard inst.id == cloudId || NanoMuseVideoGen.speaksDashScope(inst.customBaseURL ?? "") else { return false }
@@ -75,7 +77,7 @@ enum NanoMuseMediaModels {
 
     /// The instance the video model is on, or nil (0.1.41, the contract's section 3): the
     /// saved one; without a choice, the chat provider's when it is a Model Studio key of the
-    /// person's own, else nanoMuse Cloud when signed in, else the first key that can.
+    /// person's own, else a relay that advertises video, else the first key that can.
     @MainActor
     static func videoInstance() -> ProviderInstance? {
         guard let value = NanoMuseModelSlots.videoValue() else { return nil }
@@ -138,7 +140,7 @@ enum NanoMuseMediaModels {
         NotificationCenter.default.post(name: changed, object: nil)
     }
 
-    /// The video model is the Cloud's: its clips come out of the allowance.
+    /// The video model is the relay's: a self-hosted relay may account for it.
     @MainActor
     static var videoOnCloud: Bool {
         guard let cloud = NanoMuseCloud.instance else { return false }
@@ -207,6 +209,7 @@ enum NanoMuseMediaModels {
         switch NanoMuseImageGen.route() {
         case .ownKey(let k): return "\(k.model) · \(k.label)"
         case .relay: return NanoMuseCloud.modelsOn ? NanoMuseCloud.label : AppLocalized("Not set")
+        case .unavailable: return AppLocalized("Not set")
         }
     }
 
@@ -229,7 +232,7 @@ struct NanoMuseMediaModelsView: View {
     @ObservedObject private var motion = NanoMuseAvatarMotion.shared
     @ObservedObject private var faces = NanoMuseFaceStore.shared
 
-    // Image: a Bailian key on this phone, else nanoMuse Cloud (NanoMuseImageGen).
+    // Image: a Bailian key on this phone, or an eligible relay (NanoMuseImageGen).
     @State private var imageInstances: [ProviderInstance] = []
     @State private var imageInstanceId: String?
     @State private var imageModel = ""
@@ -293,18 +296,19 @@ struct NanoMuseMediaModelsView: View {
     // MARK: Image
 
     private var imageInstance: ProviderInstance? { imageInstances.first { $0.id == imageInstanceId } }
+    private var relayImageAvailable: Bool { NanoMuseModelSlots.cloudProvider()?.has(.image) == true }
 
     @ViewBuilder
     private var imageSection: some View {
         Section {
-            let ready = imageInstance != nil || NanoMuseCloud.modelsOn
+            let ready = imageInstance != nil || relayImageAvailable
             statusRow(
                 icon: "photo",
                 ready: ready,
-                line: imageInstance != nil ? "\(imageModel) · \(imageInstance?.label ?? "")" : (NanoMuseCloud.modelsOn ? NanoMuseCloud.label : AppLocalized("Not set")),
+                line: imageInstance != nil ? "\(imageModel) · \(imageInstance?.label ?? "")" : (relayImageAvailable ? NanoMuseCloud.label : AppLocalized("Not set")),
                 offLine: AppLocalized("Until one is set, the avatar cannot be changed and no pictures can be drawn. The agent will say so if you ask.")
             )
-            if NanoMuseCloud.modelsOn {
+            if relayImageAvailable {
                 choiceRow(title: NanoMuseCloud.label, selected: imageInstanceId == nil) {
                     imageInstanceId = nil
                     imageModel = ""
@@ -336,15 +340,15 @@ struct NanoMuseMediaModelsView: View {
                     .autocorrectionDisabled()
                     .onSubmit { NanoMuseImageGen.save(instanceId: inst.id, model: imageModel) }
             }
-            if imageInstances.isEmpty && !NanoMuseCloud.modelsOn {
+            if imageInstances.isEmpty && !relayImageAvailable {
                 NavigationLink(AppLocalized("Add a provider")) { ProviderInstancesView() }
             }
         } header: {
             Text(AppLocalized("Image model"))
         } footer: {
-            Text(imageInstances.isEmpty && !NanoMuseCloud.modelsOn
-                 ? AppLocalized("None of your providers can draw. Sign in to nanoMuse Cloud, or add an Alibaba Cloud Bailian provider with an API key; the avatar is drawn with one of the two.")
-                 : AppLocalized("Avatar changes: the four candidates and the poses. Alibaba Cloud Model Studio: qwen-image-3.0 (draws and poses; ¥0.18 a picture) or the Pro tier, drawn with your own key. nanoMuse Cloud draws from the account's allowance."))
+            Text(imageInstances.isEmpty
+                 ? AppLocalized("Add a provider")
+                 : AppLocalized("Image model"))
         }
     }
 
@@ -414,7 +418,7 @@ struct NanoMuseMediaModelsView: View {
             Text(AppLocalized("Video model"))
         } footer: {
             Text(videoInstances.isEmpty
-                 ? AppLocalized("No provider that can make video yet. nanoMuse speaks Alibaba Cloud Model Studio's video API, which nanoMuse Cloud relays too. Sign in to nanoMuse Cloud, or add a Model Studio key (it can be the same one as the image model uses), and the avatar starts moving; until then it stays as still pictures.")
+                 ? AppLocalized("Add a provider")
                  : AppLocalized("Makes the avatar move: a short looping clip for each state. Alibaba Cloud Model Studio: wan2.2-i2v-flash (recommended, ¥0.10 a second at 480P), another Wan model or MiniMax/MiniMax-H3; the list shows the ones this key can use, each activated once on the model's card in the Model Studio console. Billed per second of video; an avatar takes four clips of a few seconds."))
         }
     }
@@ -493,6 +497,9 @@ struct NanoMuseMediaModelsView: View {
             imageInstanceId = k.instanceId
             imageModel = k.model
         case .relay:
+            imageInstanceId = nil
+            imageModel = ""
+        case .unavailable:
             imageInstanceId = nil
             imageModel = ""
         }

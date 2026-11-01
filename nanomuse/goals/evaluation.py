@@ -1,7 +1,9 @@
 """Evidence-based goal evaluation core, opt-in by explicit library invocation.
 
-Evidence inputs belong to a trusted harness, not an agent-facing JSON interface.
-Hashes detect changed snapshots; they do not authenticate a producer or prove truth.
+This module does not change ``GoalStore`` status or run from the agent loop. Runtime
+integration must define the trusted harness that supplies observations and applies any
+later decision. Hashes detect changed snapshots; they do not authenticate a producer
+or prove truth.
 """
 
 from __future__ import annotations
@@ -17,7 +19,7 @@ from typing import Any, Literal
 Scalar = bool | int | float | str
 Verdict = Literal["verified", "partial", "unknown", "contradicted"]
 Decision = Literal["continue", "replan", "escalate", "stop"]
-EVALUATOR_VERSION = "goal-eval.v1"
+EVALUATOR_VERSION = "goal-eval.v2"
 
 
 def canonical(value: Any) -> str:
@@ -126,20 +128,34 @@ def collect_file(
     contract: Contract, run: Run, criterion: Criterion, path: Path, now: int
 ) -> Evidence:
     """An actual independent, read-only observation of a preselected local artifact."""
+    subject = path.resolve().as_uri()
+    value = hashlib.sha256(path.read_bytes()).hexdigest()
+    event = fingerprint(
+        [
+            contract.goal_id,
+            contract.revision,
+            run.id,
+            run.attempt,
+            criterion.id,
+            subject,
+            now,
+            value,
+        ]
+    )
     return observation(
-        id=f"{run.id}:file:{criterion.id}",
+        id=event,
         goal_id=contract.goal_id,
         revision=contract.revision,
         run_id=run.id,
         attempt=run.attempt,
-        call_id=f"checker:{run.id}:{criterion.id}",
+        call_id=f"checker:{event}",
         criterion_id=criterion.id,
         collector="file.sha256.v1",
         observed_at=now,
         collected_at=now,
-        subject=path.resolve().as_uri(),
+        subject=subject,
         metric="sha256",
-        value=hashlib.sha256(path.read_bytes()).hexdigest(),
+        value=value,
         unit="digest",
     )
 
@@ -184,7 +200,7 @@ def validate_result(result: dict[str, Any]) -> None:
         fields = {k: v for k, v in result.items() if k != "id"}
         if result["id"] != fingerprint(fields):
             raise ValueError("evaluation digest mismatch")
-        if type(result["schema_version"]) is not int or result["schema_version"] != 1:
+        if type(result["schema_version"]) is not int or result["schema_version"] != 2:
             raise ValueError("unsupported evaluation schema")
         if result["evaluator_version"] != EVALUATOR_VERSION:
             raise ValueError("unsupported evaluator version")
@@ -241,6 +257,16 @@ def validate_result(result: dict[str, Any]) -> None:
         )
         if result["status"] != expected:
             raise ValueError("inconsistent evaluation verdict")
+        if result["delta"] is not None and type(result["delta"]) is not int:
+            raise ValueError("invalid milestone delta")
+        values = result["observed_values"]
+        if (
+            not isinstance(values, dict)
+            or set(values) != {k for k, v in states.items() if v in ("met", "not_met")}
+            or not all(_scalar(v) for v in values.values())
+            or result["progress"] not in ("advanced", "stalled", "regressed", "unknown")
+        ):
+            raise ValueError("invalid observed values or progress")
         if any(not result["evidence"].get(k) for k, v in states.items() if v != "unknown"):
             raise ValueError("known criterion requires evidence references")
     except (KeyError, TypeError, AttributeError) as exc:
@@ -274,64 +300,81 @@ def evaluate(
             raise ValueError("baseline criteria mismatch")
         if previous["goal_id"] != contract.goal_id or previous["revision"] != contract.revision:
             raise ValueError("baseline goal binding mismatch")
-    # Duplicate delivery is harmless; reusing an id for different content is ambiguous.
+        for invariant, prefix in ((False, "outcome"), (True, "constraint")):
+            partition = [c.id for c in contract.criteria if c.invariant == invariant]
+            if previous[f"{prefix}_required"] != len(partition) or previous[
+                f"{prefix}_met"
+            ] != sorted(cid for cid in partition if previous["criteria"][cid] == "met"):
+                raise ValueError("baseline outcome/constraint partition mismatch")
+        for criterion in contract.criteria:
+            if criterion.id in previous["observed_values"]:
+                matched = _matches(criterion, previous["observed_values"][criterion.id])
+                if matched is None or matched != (previous["criteria"][criterion.id] == "met"):
+                    raise ValueError("baseline observed value does not match its criterion state")
+    # Reject unusable records before collision checks so a different scope/source
+    # cannot suppress valid observations by copying their id.
     by_id: dict[str, Evidence] = {}
     collisions: set[str] = set()
     rejected: dict[str, str] = {}
+    criteria_by_id = {c.id: c for c in contract.criteria}
     for index, e in enumerate(evidence):
         if not _identity(e.id):
             rejected[f"invalid:{index}"] = "invalid_evidence_id"
             continue
+        c = criteria_by_id.get(e.criterion_id) if _identity(e.criterion_id) else None
+        if c is None:
+            rejected[e.id] = "unknown_criterion"
+            continue
+        try:
+            intact = e.payload_digest == fingerprint(e.payload())
+        except (ValueError, TypeError):
+            intact = False
+        valid = (
+            all(_identity(v) for v in (e.id, e.call_id, e.goal_id, e.run_id, e.collector))
+            and e.goal_id == contract.goal_id
+            and _integer(e.revision, 1)
+            and e.revision == contract.revision
+            and e.run_id == run.id
+            and _integer(e.attempt, 1)
+            and e.attempt == run.attempt
+            and e.collector in c.collectors
+            and e.subject == c.subject
+            and e.metric == c.metric
+            and e.unit == c.unit
+            and e.ok is True
+            and e.allowed is True
+            and _integer(e.observed_at)
+            and _integer(e.collected_at)
+            and 0 <= now - e.observed_at <= c.max_age
+            and e.observed_at <= e.collected_at <= now
+            and intact
+            and _matches(c, e.value) is not None
+        )
+        if not valid:
+            rejected[e.id] = "invalid_binding_source_time_type_or_integrity"
+            continue
         if e.id in by_id and e != by_id[e.id]:
             collisions.add(e.id)
+            rejected[e.id] = "conflicting_evidence_id"
         by_id[e.id] = e
     states: dict[str, str] = {}
     used: dict[str, list[str]] = {}
+    values: dict[str, Scalar] = {}
     for c in contract.criteria:
-        candidates: list[Evidence] = []
-        for e in by_id.values():
-            if e.criterion_id != c.id:
-                continue
-            try:
-                intact = e.payload_digest == fingerprint(e.payload())
-            except (ValueError, TypeError):
-                intact = False
-            valid = (
-                e.id not in collisions
-                and all(_identity(v) for v in (e.id, e.call_id, e.goal_id, e.run_id, e.collector))
-                and e.goal_id == contract.goal_id
-                and _integer(e.revision, 1)
-                and e.revision == contract.revision
-                and e.run_id == run.id
-                and _integer(e.attempt, 1)
-                and e.attempt == run.attempt
-                and e.collector in c.collectors
-                and e.subject == c.subject
-                and e.metric == c.metric
-                and e.unit == c.unit
-                and e.ok is True
-                and e.allowed is True
-                and _integer(e.observed_at)
-                and _integer(e.collected_at)
-                and 0 <= now - e.observed_at <= c.max_age
-                and e.observed_at <= e.collected_at <= now
-                and intact
-                and _matches(c, e.value) is not None
-            )
-            if valid:
-                candidates.append(e)
-            else:
-                rejected[e.id] = "invalid_binding_source_time_type_or_integrity"
+        candidates = [
+            e for e in by_id.values() if e.criterion_id == c.id and e.id not in collisions
+        ]
         if not candidates:
             states[c.id], used[c.id] = "unknown", []
             continue
         latest = max(e.observed_at for e in candidates)
-        current = [e for e in candidates if e.observed_at == latest]
+        current = sorted((e for e in candidates if e.observed_at == latest), key=lambda e: e.id)
         used[c.id] = sorted(e.id for e in current)
         if any(e.value != current[0].value for e in current[1:]):
             states[c.id] = "conflict"
         else:
             states[c.id] = "met" if _matches(c, current[0].value) else "not_met"
+            values[c.id] = current[0].value
     met = sorted(k for k, v in states.items() if v == "met")
     outcome_met = sorted(
         c.id for c in contract.criteria if not c.invariant and states[c.id] == "met"
@@ -356,8 +399,39 @@ def evaluate(
     comparable = previous is not None and all(
         v in ("met", "not_met") for v in [*states.values(), *previous["criteria"].values()]
     )
+    # Milestone coverage and raw numeric progress answer different questions.
+    # Only gte has an explicit numeric direction; equality gains/losses use the
+    # predicate state. Unknown outcomes never count as unchanged observations.
+    gains, declines = False, False
+    outcomes_comparable = previous is not None
+    for c in contract.criteria:
+        if c.invariant:
+            continue
+        if previous is None or c.id not in values or c.id not in previous["observed_values"]:
+            outcomes_comparable = False
+            continue
+        old, new = previous["observed_values"][c.id], values[c.id]
+        if c.op == "gte":
+            old_effective = min(old, c.target)  # type: ignore[type-var]
+            new_effective = min(new, c.target)  # type: ignore[type-var]
+            gains = gains or new_effective > old_effective  # type: ignore[operator]
+            declines = declines or new_effective < old_effective  # type: ignore[operator]
+        else:
+            gains = gains or (previous["criteria"][c.id] != "met" and states[c.id] == "met")
+            declines = declines or (
+                previous["criteria"][c.id] == "met" and states[c.id] == "not_met"
+            )
+    progress = (
+        "regressed"
+        if declines
+        else "advanced"
+        if gains
+        else "stalled"
+        if outcomes_comparable
+        else "unknown"
+    )
     result = {
-        "schema_version": 1,
+        "schema_version": 2,
         "evaluator_version": EVALUATOR_VERSION,
         "contract_hash": contract_hash,
         "goal_id": contract.goal_id,
@@ -375,6 +449,8 @@ def evaluate(
         "constraint_required": sum(c.invariant for c in contract.criteria),
         "required": len(states),
         "delta": len(outcome_met) - len(prior_outcomes) if comparable else None,
+        "observed_values": values,
+        "progress": progress,
         "lost": lost,
         "violated": violated,
         "evidence": used,
@@ -393,13 +469,19 @@ def decide(
 ) -> tuple[Decision, str]:
     """Recommendation only. Approval is a trusted test input, not an authorization API."""
     validate_result(result)
+    if not _integer(stalled_runs) or not _integer(unknown_runs):
+        raise ValueError("continuity counters must be nonnegative integers")
     if approved_result_id == result["id"] and result["status"] == "verified":
         return "stop", "completion_approved"
     if result["status"] == "verified":
         return "escalate", "review_completion"
-    if result["status"] == "unknown" and unknown_runs >= 3:
+    if "unknown" in result["criteria"].values() and unknown_runs >= 3:
         return "escalate", "verification_budget_exhausted"
-    if result["status"] == "contradicted" or (result["status"] == "partial" and stalled_runs >= 3):
+    if (
+        result["status"] == "contradicted"
+        or result["progress"] == "regressed"
+        or (result["status"] == "partial" and stalled_runs >= 3 and result["progress"] == "stalled")
+    ):
         return "replan", "review_plan"
     if result["run_state"] != "completed":
         return "continue", "reconcile_before_retry"

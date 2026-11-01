@@ -41,7 +41,7 @@ nanomuse run "Summarise the top three Hacker News stories into hn.md" [--auto]
 nanomuse daemon [--interval 3600] [--once]
 ```
 
-推进每一个进行中的目标，休眠，再来一遍。它跑在哨兵的 `auto` 模式下，所以要配上拒绝规则和收紧的 `egress_allowlist`。App 里的「后台工作」开关在 `nanomuse serve` 内做的是同一件事：每个周期推进一个目标，进展发到聊天里。
+把每一个进行中的目标各自放进一次性的会话里推进，休眠，再来一遍；每轮做了什么打印在这里。它跑在哨兵的 `auto` 模式下，所以要配上拒绝规则和收紧的 `egress_allowlist`。它是 App 里「后台工作」开关（在 `nanomuse serve` 内）的朴素版、无人值守版：那个开关每个周期挑一个目标，在聊天自己的上下文和哨兵之下运行，进展发到聊天里，重启后还记得欠下的那一轮（[app.md](app.md#background-work)）；daemon 没有聊天，也不记得上一轮，只是跑。
 
 ## 目标 {#goals}
 
@@ -73,10 +73,11 @@ nanomuse triggers list [--all]                                                  
 nanomuse triggers add mail  "Summarise it and draft a reply" --match "landlord"   # a new mail whose sender/subject has every word
 nanomuse triggers add event "Put together a one-page brief"  --match "review" --lead 30   # 30 min before a matching event
 nanomuse triggers add hook  "Check that the site is up"      --match "deploy"    # prints the URL to POST to
+nanomuse triggers add device "Say the phone is back"         --match "pixel"     # a device of the account comes online
 nanomuse triggers cancel t_1a2b3c
 ```
 
-触发器在事情发生时触发，而不是到点触发：`mail` 需要邮件连接器（运行中的服务器每隔 `triggers.mail_poll_minutes` 查看一次收件箱，按 IMAP UID 记录，所以不会重放，也不会触发两次）；`event` 需要一个日历订阅；`hook` 是一个带密钥的 URL，任何程序都可以向它 `POST`；请求体成为智能体的上下文。每次触发都是在设置它的那个聊天里的一次后台运行，在动态里显示为 *New mail: …*、*Coming up: …* 或 *Webhook: …*。邮件或请求是作为数据交给模型的，并附带一句说明：只有你预先写下的那段话才决定做什么。
+触发器在事情发生时触发，而不是到点触发：`mail` 需要邮件连接器（运行中的服务器每隔 `triggers.mail_poll_minutes` 查看一次收件箱，按 IMAP UID 记录，所以不会重放，也不会触发两次）；`event` 需要一个日历订阅；`hook` 是一个带密钥的 URL，任何程序都可以向它 `POST`；请求体成为智能体的上下文；`device` 需要这台电脑在 hub 上，账号下某台设备上线时触发（按名称或类型里的词匹配，本机不宣告自己，App 启动时就在线的设备不算一次上线）。每次触发都是在设置它的那个聊天里的一次后台运行，在动态里显示为 *New mail: …*、*Coming up: …*、*Webhook: …* 或 *Device online: …*。邮件或请求是作为数据交给模型的，并附带一句说明：只有你预先写下的那段话才决定做什么。
 
 ## 日历 {#calendar}
 
@@ -187,7 +188,7 @@ nanomuse audit [-n 20] [--json]        # recent decisions, approvals, tool calls
 nanomuse config init [--path config/config.toml] [--force]
 nanomuse config show                   # effective settings, secrets masked
 nanomuse config path                   # which file is in use
-nanomuse doctor [--no-model]           # config, data dir, model, connectors — one screen
+nanomuse doctor [--no-model]           # config, data dir, model, connectors, one screen
 nanomuse version                       # also: nanomuse --version / -V
 nanomuse mcp                           # this computer's screen and hands as an MCP server on stdio, for another host
 ```

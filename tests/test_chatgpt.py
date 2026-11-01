@@ -153,7 +153,6 @@ async def test_a_refused_refresh_clears_the_store(tmp_path: Path):
     assert not auth.signed_in()
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="the lock is fcntl's")
 @pytest.mark.asyncio
 async def test_the_loop_keeps_turning_while_another_process_holds_the_lock(tmp_path: Path):
     """A sibling process refreshing the token holds ``chatgpt.lock``; the wait for it must
@@ -199,6 +198,35 @@ async def test_the_loop_keeps_turning_while_another_process_holds_the_lock(tmp_p
         beat.cancel()
     # the other process's token is taken as it is: no second refresh over the wire
     assert fresh.access == token(nonce="theirs").access and calls == 0
+
+
+def test_a_second_handle_waits_for_the_lock_and_takes_it_after(tmp_path: Path):
+    """The lock is exclusive across handles on both platforms, which is the whole point: on
+    Windows the same file opened twice is two holders, as it is on POSIX."""
+    import threading
+
+    store = TokenStore.in_dir(tmp_path)
+    held = threading.Event()
+    release = threading.Event()
+    took_it = threading.Event()
+
+    def holder() -> None:
+        with store.lock():
+            held.set()
+            release.wait(5)
+
+    def waiter() -> None:
+        held.wait(5)
+        with store.lock():
+            took_it.set()
+
+    threading.Thread(target=holder, daemon=True).start()
+    threading.Thread(target=waiter, daemon=True).start()
+    assert held.wait(5)
+    time.sleep(0.3)
+    assert not took_it.is_set(), "the second handle took a lock somebody was holding"
+    release.set()
+    assert took_it.wait(5), "the second handle never got the lock after it was released"
 
 
 # ----------------------------------------------------------------------------- translation
@@ -301,6 +329,52 @@ def test_chat_completions_to_the_codex_responses_body():
     assert json.loads(out2["input"][1]["output"]) == [{"type": "text", "text": "ok"}]
     assert out2["reasoning"] == {"summary": "auto", "effort": "low"}
     assert "tools" not in out2 and out2["model"] == "gpt-5.6-sol"
+
+
+def test_to_codex_dedupes_call_ids_and_keeps_outputs_paired():
+    def call(call_id: str) -> dict[str, Any]:
+        return {
+            "id": call_id,
+            "type": "function",
+            "function": {"name": "echo", "arguments": "{}"},
+        }
+
+    long_id = "x" * 70
+    out = to_codex(
+        {
+            "messages": [
+                {
+                    "role": "assistant",
+                    "tool_calls": [call("call_same"), call("call_same"), call("call_same-2")],
+                },
+                {"role": "tool", "tool_call_id": "call_same", "content": "first"},
+                {"role": "tool", "tool_call_id": "call_same", "content": "second"},
+                {"role": "tool", "tool_call_id": "call_same-2", "content": "natural suffix"},
+                {
+                    "role": "assistant",
+                    "tool_calls": [call("call_same"), call(long_id), call(long_id)],
+                },
+                {"role": "tool", "tool_call_id": "call_same", "content": "third"},
+                {"role": "tool", "tool_call_id": long_id, "content": "long first"},
+                {"role": "tool", "tool_call_id": long_id, "content": "long second"},
+            ]
+        }
+    )
+
+    items = out["input"]
+    calls = [item["call_id"] for item in items if item.get("type") == "function_call"]
+    outputs = [item["call_id"] for item in items if item.get("type") == "function_call_output"]
+    assert calls == [
+        "call_same",
+        "call_same-2",
+        "call_same-2-2",
+        "call_same-3",
+        "x" * 64,
+        f"{'x' * 62}-2",
+    ]
+    assert outputs == calls
+    assert len(calls) == len(set(calls))
+    assert all(len(call_id) <= 64 for call_id in calls)
 
 
 @pytest.mark.asyncio

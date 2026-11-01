@@ -4,23 +4,27 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import tempfile
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from nanomuse import prompts
+from nanomuse.agent.context import fit_context
 from nanomuse.calendar import CalendarFeeds
 from nanomuse.config import Settings
 from nanomuse.contacts import ContactBook
 from nanomuse.goals import GoalStore
+from nanomuse.llm import budget as task_budget
 from nanomuse.llm import session as llm_session
 from nanomuse.llm.base import BaseLLM
 from nanomuse.llm.vision import keep_newest_images
 from nanomuse.logger import logger
 from nanomuse.memory import MemoryItem, MemoryStore
 from nanomuse.runtime import device
-from nanomuse.schema import AgentState, Attachment, Message, Role, ToolResult
+from nanomuse.schema import AgentState, Attachment, Message, Role, ToolResult, new_id
 from nanomuse.sentinel import AuditLog, Sentinel
 from nanomuse.skills import SkillLibrary
 from nanomuse.tools.base import ToolCollection
@@ -31,9 +35,11 @@ class Incoming:
     """A user message on its way to the agent: the text, what was attached to it, the
     language of the client's screens (a BCP-47 tag, "" when the client did not say), and,
     for *Use nanoMuse Cloud this time*, the model client this one turn runs on (``llm``)
-    and its id (``model``); None and "" for a turn on the configured model."""
+    and its id (``model``); None and "" for a turn on the configured model. ``run`` is what
+    set the turn going, in the relay's word (``person``, ``schedule``, ``feed``, ``goal``,
+    ``hub``; docs/cloud.md "Provenance")."""
 
-    __slots__ = ("files", "language", "llm", "model", "text")
+    __slots__ = ("delivery", "files", "language", "llm", "model", "run", "text")
 
     def __init__(
         self,
@@ -42,12 +48,16 @@ class Incoming:
         language: str = "",
         llm: BaseLLM | None = None,
         model: str = "",
+        delivery: str = "",
+        run: str = "person",
     ):
         self.text = text
         self.files = files or []
         self.language = language
         self.llm = llm
         self.model = model
+        self.delivery = delivery
+        self.run = run
 
 
 class MuseAgent:
@@ -85,6 +95,9 @@ class MuseAgent:
         # The id model calls carry for a vendor that wants one per conversation (OpenCode Go):
         # the thread's, else one of this agent's own for as long as it lives.
         self.session_id = conversation_id or llm_session.new_fallback()
+        # the id the record keeps the latest model call under and where it was kept
+        # (``cloud`` or ``own``; ""/"" before the first), for the notes about the turn
+        self.last_call: tuple[str, str] = ("", "")
         self.messages: list[Message] = []
         self.state = AgentState.IDLE
         self.turns = 0
@@ -93,6 +106,8 @@ class MuseAgent:
         # before the next model call instead of waiting for the current run to finish.
         self.inbox: asyncio.Queue[str | Incoming] | None = None
         self._told_no_vision = False
+        self.last_budget: dict[str, Any] = {}
+        self._task_start = 0
         # The language of the screens the person reads this conversation on, from the latest
         # message that said (a BCP-47 tag); the language rule names it ahead of the script
         # of one message. "" means no client has said, and the script decides.
@@ -106,11 +121,19 @@ class MuseAgent:
             return 0
         count = 0
         while not self.inbox.empty():
+            # a look at the head before taking it: what must run as a turn of its own stays
+            item = self.inbox._queue[0]  # type: ignore[attr-defined]
+            incoming = item if isinstance(item, Incoming) else Incoming(item)
+            if incoming.llm is not None or incoming.model or incoming.delivery:
+                # A one-turn client belongs to the queued turn, not to the run that happens
+                # to be in progress, and scheduled work (a reminder, a routine, a trigger)
+                # is a background run with a purpose of its own that acknowledges its
+                # source when it ends. Both wait for the worker to run them alone.
+                break
             try:
-                item = self.inbox.get_nowait()
+                self.inbox.get_nowait()
             except asyncio.QueueEmpty:  # pragma: no cover
                 break
-            incoming = item if isinstance(item, Incoming) else Incoming(item)
             if incoming.language:
                 self.ui_language = incoming.language
             self.messages.append(self.user_message(incoming.text, incoming.files))
@@ -122,7 +145,11 @@ class MuseAgent:
         """The user's message as the model gets it: the text, a line per attached file
         (path and what it is), and the pictures as images when the model takes them."""
         if not files:
-            return Message.user(text)
+            return Message(
+                role=Role.USER,
+                content=text,
+                meta={"user_request": True, "request_id": new_id("message")},
+            )
         lines = [f"- {a.path} ({a.describe()})" for a in files]
         note = "[Attached files]\n" + "\n".join(lines)
         if any(a.kind != "image" for a in files):
@@ -130,7 +157,12 @@ class MuseAgent:
         content = f"{text}\n\n{note}" if text.strip() else note
         workspace = Path(self.settings.agent.workspace).expanduser()
         images = [str(workspace / a.path) for a in files if a.kind == "image"]
-        return Message.user(content, images=images or None)
+        return Message(
+            role=Role.USER,
+            content=content,
+            images=images or None,
+            meta={"user_request": True, "request_id": new_id("message")},
+        )
 
     # ------------------------------------------------------------------ prompt
     def sandbox_note(self) -> str:
@@ -376,7 +408,13 @@ class MuseAgent:
             # Never start in the middle of a tool exchange: advance to the next user message.
             while cutoff < len(msgs) and msgs[cutoff].role != Role.USER:
                 cutoff += 1
-            window = list(msgs[cutoff:]) if cutoff < len(msgs) else list(msgs[-limit:])
+            if cutoff >= len(msgs):
+                # A single long turn can fill the window. Keep the leading tool
+                # exchange whole, even if that takes a few messages over the limit.
+                cutoff = slice(-limit, None).indices(len(msgs))[0]
+                while 0 < cutoff < len(msgs) and msgs[cutoff].role == Role.TOOL:
+                    cutoff -= 1
+            window = list(msgs[cutoff:])
         return keep_newest_images(window, self.settings.agent.max_context_images)
 
     # ------------------------------------------------------------------ stuck detection
@@ -398,6 +436,67 @@ class MuseAgent:
         purpose: str | None = None,
         files: list[Attachment] | None = None,
         language: str = "",
+        run: str = "person",
+    ) -> str:
+        if self.state == AgentState.RUNNING:
+            raise RuntimeError("agent is already running")
+        token = task_budget.begin(self.settings.agent.budget, inherit=False)
+        budget = task_budget.current()
+        assert budget is not None
+        self._task_start = len(self.messages)
+        deadline = asyncio.timeout(self.settings.agent.budget.max_seconds or None)
+        try:
+            async with deadline:
+                return await self._run(
+                    user_input, purpose=purpose, files=files, language=language, run=run
+                )
+        except (task_budget.BudgetExceeded, TimeoutError) as exc:
+            if isinstance(exc, TimeoutError) and not deadline.expired():
+                raise
+            reason = exc.reason if isinstance(exc, task_budget.BudgetExceeded) else "time"
+            budget.stopped = reason
+            reply_language = language or self.ui_language or self.settings.agent.language
+            if reply_language in ("", "auto"):
+                reply_language = "zh" if prompts.detect_language(user_input) == "Chinese" else "en"
+            final = task_budget.BudgetExceeded(reason).message(reply_language)
+            self._repair_dangling_tool_calls(reason=final)
+            self.messages.append(Message.assistant(final))
+            self.ui.on_assistant_message(final, None)
+            self.state = AgentState.FINISHED
+            self._save_session()
+            return final
+        finally:
+            try:
+                self.last_budget = budget.snapshot()
+                # a line in the audit log when a budget is in force or was reached; a task
+                # with no limits set leaves the log as it was
+                if budget.limited or budget.stopped:
+                    self.audit.record("task_budget", **self.last_budget)
+            finally:
+                task_budget.end(token)
+
+    def _request_context(
+        self, system_prompt: str, tools: list[dict[str, Any]] | None
+    ) -> list[Message]:
+        window = self.context_messages()
+        protected = [m for m in self.messages[self._task_start :] if m.meta.get("user_request")]
+        if self.settings.agent.max_context_tokens:
+            present = {m.meta.get("request_id") for m in window}
+            window = [m for m in protected if m.meta.get("request_id") not in present] + window
+        return fit_context(
+            [Message.system(system_prompt), *window],
+            tools,
+            self.settings.agent.max_context_tokens,
+            protected,
+        )
+
+    async def _run(
+        self,
+        user_input: str,
+        purpose: str | None = None,
+        files: list[Attachment] | None = None,
+        language: str = "",
+        run: str = "person",
     ) -> str:
         """One task: a user message (or a background prompt) worked to completion.
 
@@ -405,7 +504,9 @@ class MuseAgent:
         to the message itself. ``files`` are the attachments that came with the message.
         ``language`` is the BCP-47 tag of the client's screens when the client sent one;
         it is remembered for the conversation and names the reply language ahead of the
-        script of the message. Task-scoped approvals end when this call returns.
+        script of the message. ``run`` is what set the turn going (``person`` by default;
+        ``schedule``, ``feed``, ``goal``, ``hub`` for the runs nobody typed), told to the
+        relay with every call of the turn. Task-scoped approvals end when this call returns.
         """
         if self.state == AgentState.RUNNING:
             raise RuntimeError("agent is already running")
@@ -428,6 +529,7 @@ class MuseAgent:
             purpose or user_input, conversation=self.conversation_id
         )
         session_token = llm_session.enter(self.session_id)
+        turn_token = llm_session.begin_turn(run, self.turns)
         try:
             while step < self.settings.agent.max_steps:
                 step += 1
@@ -436,9 +538,13 @@ class MuseAgent:
                     # the language rule and the memory section follow the latest message
                     latest = self.messages[-1].content or ""
                     system_prompt = self.build_system_prompt(latest, await self.recall_for(latest))
-                context = [Message.system(system_prompt), *self.context_messages()]
-                response = await self.llm.ask(
-                    context, tools=tool_params, on_delta=self.ui.on_text_delta
+                context = self._request_context(system_prompt, tool_params)
+                response = await task_budget.ask(
+                    self.llm,
+                    context,
+                    tools=tool_params,
+                    on_delta=self.ui.on_text_delta,
+                    on_reasoning_delta=self.ui.on_reasoning_delta,
                 )
                 if (
                     response.finish_reason == "length"
@@ -448,12 +554,16 @@ class MuseAgent:
                     # the model thought until the budget ran out (reasoning models do on a
                     # hard step): the same call once more, with room to think and answer
                     logger.info("reply cut off before it began; asking again with more room")
-                    response = await self.llm.ask(
+                    response = await task_budget.ask(
+                        self.llm,
                         context,
                         tools=tool_params,
                         on_delta=self.ui.on_text_delta,
+                        on_reasoning_delta=self.ui.on_reasoning_delta,
                         max_tokens=self.llm.roomier_max_tokens(),
                     )
+                if response.request_id:
+                    self.last_call = (response.request_id, response.turn_source)
                 if self.llm.vision_available is False and not self._told_no_vision:
                     if any(m.images for m in self.messages if m.role == Role.USER):
                         self._told_no_vision = True
@@ -492,6 +602,9 @@ class MuseAgent:
                 stop = False
                 pictures: list[str] = []
                 for call in response.tool_calls:
+                    budget = task_budget.current()
+                    if budget is not None:
+                        budget.check()
                     tool = self.tools.get(call.name)
                     if tool is None:
                         summary = f"{call.name}(?)"
@@ -534,13 +647,19 @@ class MuseAgent:
                         )
                     )
                 if self._is_stuck():
-                    logger.warning("agent seems stuck – nudging")
+                    logger.warning("agent seems stuck; nudging")
                     self.messages.append(Message.user(prompts.STUCK_PROMPT))
             else:
                 # Step budget exhausted: ask for a wrap-up without tools.
                 self.messages.append(Message.user(prompts.MAX_STEPS_PROMPT))
-                context = [Message.system(system_prompt), *self.context_messages()]
-                response = await self.llm.ask(context, tools=None, on_delta=self.ui.on_text_delta)
+                context = self._request_context(system_prompt, None)
+                response = await task_budget.ask(
+                    self.llm,
+                    context,
+                    tools=None,
+                    on_delta=self.ui.on_text_delta,
+                    on_reasoning_delta=self.ui.on_reasoning_delta,
+                )
                 self.messages.append(response.to_message())
                 self.ui.on_assistant_message(response.content, response.reasoning)
                 final = response.content or "(step limit reached)"
@@ -549,6 +668,7 @@ class MuseAgent:
             self.state = AgentState.ERROR
             raise
         finally:
+            llm_session.end_turn(turn_token)
             llm_session.leave(session_token)
             self.sentinel.end_task(task_token)
             self._save_session()
@@ -564,6 +684,7 @@ class MuseAgent:
     def _save_session(self) -> None:
         if not self.session_file:
             return
+        temporary: Path | None = None
         try:
             self.session_file.parent.mkdir(parents=True, exist_ok=True)
             data: dict[str, Any] = {
@@ -571,9 +692,25 @@ class MuseAgent:
                 "turns": self.turns,
                 "messages": [m.model_dump(mode="json") for m in self.messages],
             }
-            self.session_file.write_text(json.dumps(data, ensure_ascii=False, indent=1), "utf-8")
+            with tempfile.NamedTemporaryFile(
+                "w",
+                encoding="utf-8",
+                dir=self.session_file.parent,
+                prefix=f".{self.session_file.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as handle:
+                temporary = Path(handle.name)
+                json.dump(data, handle, ensure_ascii=False, indent=1)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, self.session_file)
+            temporary = None
         except OSError as exc:  # pragma: no cover
             logger.warning("could not save session: {}", exc)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
 
     def load_session(self, path: Path) -> int:
         data = json.loads(Path(path).read_text("utf-8"))
@@ -582,7 +719,7 @@ class MuseAgent:
         self._repair_dangling_tool_calls()
         return len(self.messages)
 
-    def _repair_dangling_tool_calls(self) -> None:
+    def _repair_dangling_tool_calls(self, reason: str = "") -> None:
         """A restart in the middle of a tool call (say, while an approval was pending)
         leaves an assistant message whose tool calls have no results. Providers reject
         that history outright, so give every orphan a result that says what happened."""
@@ -603,11 +740,14 @@ class MuseAgent:
                 if call.id not in answered:
                     repaired.append(
                         Message.tool(
-                            "(no result: the app was restarted before this call finished)",
+                            reason
+                            or "(no result: the app was restarted before this call finished)",
                             call.id,
                             call.function.name,
                         )
                     )
+                    if reason:
+                        self.ui.on_tool_result(call, ToolResult.fail(reason))
         if len(repaired) != len(self.messages):
             logger.info("repaired {} unanswered tool call(s)", len(repaired) - len(self.messages))
             self.messages = repaired

@@ -315,6 +315,10 @@
 		E5L200SS4 /* SessionsOffloadBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5L200SS3 /* SessionsOffloadBridge.swift */; };
 		E5LC00001 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = E5LC00002 /* Localizable.xcstrings */; };
 		E5LC00003 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = E5LC00002 /* Localizable.xcstrings */; };
+		E5NP00001 /* preset-moss-courier.webp in Resources */ = {isa = PBXBuildFile; fileRef = E5NP00011 /* preset-moss-courier.webp */; };
+		E5NP00002 /* preset-tide-tinker.webp in Resources */ = {isa = PBXBuildFile; fileRef = E5NP00012 /* preset-tide-tinker.webp */; };
+		E5NP00003 /* preset-dusk-moth.webp in Resources */ = {isa = PBXBuildFile; fileRef = E5NP00013 /* preset-dusk-moth.webp */; };
+		E5NP00004 /* preset-copper-acorn.webp in Resources */ = {isa = PBXBuildFile; fileRef = E5NP00014 /* preset-copper-acorn.webp */; };
 		E5LD00001 /* ToolLoopDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5LD00003 /* ToolLoopDetector.swift */; };
 		E5LD00002 /* ToolLoopDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5LD00003 /* ToolLoopDetector.swift */; };
 		E5LOCK001 /* SessionLockStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5LOCK101 /* SessionLockStore.swift */; };
@@ -1013,6 +1017,10 @@
 		E5L200SS1 /* SessionsOffload.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = SessionsOffload.m; sourceTree = "<group>"; };
 		E5L200SS3 /* SessionsOffloadBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionsOffloadBridge.swift; sourceTree = "<group>"; };
 		E5LC00002 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		E5NP00011 /* preset-moss-courier.webp */ = {isa = PBXFileReference; lastKnownFileType = image.webp; name = "preset-moss-courier.webp"; path = "NanoMuse/Resources/preset-moss-courier.webp"; sourceTree = SOURCE_ROOT; };
+		E5NP00012 /* preset-tide-tinker.webp */ = {isa = PBXFileReference; lastKnownFileType = image.webp; name = "preset-tide-tinker.webp"; path = "NanoMuse/Resources/preset-tide-tinker.webp"; sourceTree = SOURCE_ROOT; };
+		E5NP00013 /* preset-dusk-moth.webp */ = {isa = PBXFileReference; lastKnownFileType = image.webp; name = "preset-dusk-moth.webp"; path = "NanoMuse/Resources/preset-dusk-moth.webp"; sourceTree = SOURCE_ROOT; };
+		E5NP00014 /* preset-copper-acorn.webp */ = {isa = PBXFileReference; lastKnownFileType = image.webp; name = "preset-copper-acorn.webp"; path = "NanoMuse/Resources/preset-copper-acorn.webp"; sourceTree = SOURCE_ROOT; };
 		E5LD00003 /* ToolLoopDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolLoopDetector.swift; sourceTree = "<group>"; };
 		E5LOCK101 /* SessionLockStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionLockStore.swift; sourceTree = "<group>"; };
 		E5LOCK102 /* FaceIDProtectionSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaceIDProtectionSettingsView.swift; sourceTree = "<group>"; };
@@ -1449,6 +1457,10 @@
 				E5E000018 /* Minis.entitlements */,
 				E5PV00002 /* PrivacyInfo.xcprivacy */,
 				E5LC00002 /* Localizable.xcstrings */,
+				E5NP00011 /* preset-moss-courier.webp */,
+				E5NP00012 /* preset-tide-tinker.webp */,
+				E5NP00013 /* preset-dusk-moth.webp */,
+				E5NP00014 /* preset-copper-acorn.webp */,
 				E5IP00010 /* InfoPlist.strings */,
 				E5AS00010 /* AppShortcuts.strings */,
 				E5A000011 /* default_mount */,
@@ -2542,6 +2554,10 @@
 				E51000003 /* Assets.xcassets in Resources */,
 				E5PV00001 /* PrivacyInfo.xcprivacy in Resources */,
 				E5LC00001 /* Localizable.xcstrings in Resources */,
+				E5NP00001 /* preset-moss-courier.webp in Resources */,
+				E5NP00002 /* preset-tide-tinker.webp in Resources */,
+				E5NP00003 /* preset-dusk-moth.webp in Resources */,
+				E5NP00004 /* preset-copper-acorn.webp in Resources */,
 				E5IP00001 /* InfoPlist.strings in Resources */,
 				E5AS00001 /* AppShortcuts.strings in Resources */,
 				E5Q000002 /* cl100k_base.tiktoken in Resources */,
@@ -3203,7 +3219,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 48;
+				CURRENT_PROJECT_VERSION = 52;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_PREPROCESSOR_DEFINITIONS = (
@@ -3212,7 +3228,7 @@
 				);
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
-				MARKETING_VERSION = 1.0.5;
+				MARKETING_VERSION = 1.0.9;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.nanomuse.MinisUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
@@ -3227,12 +3243,12 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 48;
+				CURRENT_PROJECT_VERSION = 52;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
-				MARKETING_VERSION = 1.0.5;
+				MARKETING_VERSION = 1.0.9;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.nanomuse.MinisUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
@@ -3248,7 +3264,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 48;
+				CURRENT_PROJECT_VERSION = 52;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_PREPROCESSOR_DEFINITIONS = (
@@ -3264,7 +3280,7 @@
 					"$(SRCROOT)/Vendor/cppjieba/include",
 				);
 				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
-				MARKETING_VERSION = 1.0.5;
+				MARKETING_VERSION = 1.0.9;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.nanomuse.MinisTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
@@ -3281,7 +3297,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 48;
+				CURRENT_PROJECT_VERSION = 52;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -3293,7 +3309,7 @@
 					"$(SRCROOT)/Vendor/cppjieba/include",
 				);
 				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
-				MARKETING_VERSION = 1.0.5;
+				MARKETING_VERSION = 1.0.9;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.nanomuse.MinisTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
@@ -3442,7 +3458,7 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = Minis.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 48;
+				CURRENT_PROJECT_VERSION = 52;
 				DEVELOPMENT_ASSET_PATHS = "\"Preview Content\"";
 				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
@@ -3472,7 +3488,7 @@
 					"@executable_path/Frameworks",
 				);
 				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/../../deps/libs";
-				MARKETING_VERSION = 1.0.5;
+				MARKETING_VERSION = 1.0.9;
 				OTHER_LDFLAGS = (
 					"-lish_emu",
 					"-lish",
@@ -3497,7 +3513,7 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = Minis.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 48;
+				CURRENT_PROJECT_VERSION = 52;
 				DEVELOPMENT_ASSET_PATHS = "\"Preview Content\"";
 				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
@@ -3527,7 +3543,7 @@
 					"@executable_path/Frameworks",
 				);
 				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/../../deps/libs";
-				MARKETING_VERSION = 1.0.5;
+				MARKETING_VERSION = 1.0.9;
 				OTHER_LDFLAGS = (
 					"-lish_emu",
 					"-lish",
@@ -3548,7 +3564,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 48;
+				CURRENT_PROJECT_VERSION = 52;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ShareExtension/Info.plist;
@@ -3560,7 +3576,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.0.5;
+				MARKETING_VERSION = 1.0.9;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.nanomuse.app.ShareExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -3575,7 +3591,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 48;
+				CURRENT_PROJECT_VERSION = 52;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ShareExtension/Info.plist;
@@ -3587,7 +3603,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.0.5;
+				MARKETING_VERSION = 1.0.9;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.nanomuse.app.ShareExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -3602,7 +3618,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = FileProvider/FileProvider.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 48;
+				CURRENT_PROJECT_VERSION = 52;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = FileProvider/Info.plist;
@@ -3614,7 +3630,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.0.5;
+				MARKETING_VERSION = 1.0.9;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.nanomuse.app.FileProvider;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -3629,7 +3645,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = FileProvider/FileProvider.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 48;
+				CURRENT_PROJECT_VERSION = 52;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = FileProvider/Info.plist;
@@ -3641,7 +3657,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.0.5;
+				MARKETING_VERSION = 1.0.9;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.nanomuse.app.FileProvider;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -3656,7 +3672,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = AgentWidget/AgentWidget.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 48;
+				CURRENT_PROJECT_VERSION = 52;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = AgentWidget/Info.plist;
@@ -3668,7 +3684,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.0.5;
+				MARKETING_VERSION = 1.0.9;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.nanomuse.app.AgentWidget;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -3683,7 +3699,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = AgentWidget/AgentWidget.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 48;
+				CURRENT_PROJECT_VERSION = 52;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = AgentWidget/Info.plist;
@@ -3695,7 +3711,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.0.5;
+				MARKETING_VERSION = 1.0.9;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.nanomuse.app.AgentWidget;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
