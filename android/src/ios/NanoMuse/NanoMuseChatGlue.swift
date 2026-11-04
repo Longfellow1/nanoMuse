@@ -57,6 +57,8 @@ extension AIChatViewModel {
     func nmAfterTurn() {
         let key = nmSessionKey
         let reply = nmLastAssistantText()
+        // the record hears a turn that ended in an error (a Stop was told at the Stop); the next turn is the person's again
+        NanoMuseFeedback.shared.turnEnded(session: key, errored: messages.last.map { $0.role == .assistant && !($0.error ?? "").isEmpty } ?? false)
         NanoMuseGoalFlow.afterTurn(session: key, assistantText: reply)
         NanoMuseFeedFlow.afterTurn(session: key, assistantText: reply)
         NanoMuseFirstConversation.shared.afterTurn(session: key, assistantText: reply, vm: self)
@@ -114,18 +116,20 @@ extension AIChatViewModel {
         guard !agentMessages.isEmpty else { return }
         inputText = ""
         scrollToBottomSignal.send()
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            let before = self.nmSessionKey
-            await self.ensureSession()
-            if before != self.nmSessionKey { self.nmRebind(from: before, to: self.nmSessionKey) }
-            for var m in agentMessages {
-                let idx = self.agentHistory.count
-                self.agentHistory.append(m)
-                if let id = await self.persistAgentMessage(m), idx < self.agentHistory.count {
-                    m.dbMessageId = id
-                    self.agentHistory[idx].dbMessageId = id
-                }
+        Task { @MainActor [weak self] in await self?.nmRecord(agentMessages) }
+    }
+
+    /// Into the history and the store, after the session exists: rows the chat already shows.
+    func nmRecord(_ agentMessages: [AgentMessage]) async {
+        let before = nmSessionKey
+        await ensureSession()
+        if before != nmSessionKey { nmRebind(from: before, to: nmSessionKey) }
+        for var m in agentMessages {
+            let idx = agentHistory.count
+            agentHistory.append(m)
+            if let id = await persistAgentMessage(m), idx < agentHistory.count {
+                m.dbMessageId = id
+                agentHistory[idx].dbMessageId = id
             }
         }
     }
@@ -144,8 +148,9 @@ extension AIChatViewModel {
     // MARK: C9 presence
 
     /// Put "{device} is working…" under the last message when it is another device's user line
-    /// and presence says that device is at work on this conversation; take it off otherwise
-    /// (the reply arrived, presence said done, or ten minutes passed). Cheap: the last row only.
+    /// and presence says that device is at work on this conversation — with the run's step or
+    /// "waiting for you" when the frame said so (relay 0.31); take it off otherwise (the reply
+    /// arrived, presence said done, or ten minutes passed). Cheap: the last row only.
     func nmApplyPresence() {
         let key = nmSessionKey
         let last = messages.last
@@ -154,7 +159,7 @@ extension AIChatViewModel {
         if remote, let sid = sessionId, let cid = NanoMuseSync.shared.cid(for: sid) {
             entry = NanoMusePresence.shared.working(for: cid)
         }
-        let line = NanoMusePresence.line(lastIsRemoteUser: remote, lastFromDevice: last?.nmFromDevice, entry: entry, me: NanoMuseHub.shared.deviceId)
-        NanoMusePresence.shared.show(line, on: last, session: key)
+        let device = NanoMusePresence.line(lastIsRemoteUser: remote, lastFromDevice: last?.nmFromDevice, entry: entry, me: NanoMuseHub.shared.deviceId)
+        NanoMusePresence.shared.show(device.map { NanoMusePresence.sentence(device: $0, entry: entry) }, on: last, session: key)
     }
 }

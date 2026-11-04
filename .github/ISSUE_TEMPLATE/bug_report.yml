@@ -1,5 +1,5 @@
 name: Bug report / 问题报告
-description: Something in the runtime, the web console, the desktop app, the iPhone app, the relay or the showcase does not work the way the docs say it does. (The Android app has its own form.) / 运行时、网页控制台、桌面版、iPhone 应用、中继或展示站的某处和文档说的不一样。（Android 应用用另一张表单。）
+description: The runtime, web console, desktop app, iPhone app, relay or showcase does not work as the docs say. (The Android app has its own form.) / 运行时、网页控制台、桌面版、iPhone、中继或展示站与文档说的不符。（Android 另有表单。）
 labels: ["bug"]
 body:
   - type: markdown
@@ -63,7 +63,7 @@ body:
     id: os
     attributes:
       label: OS and runtime / 系统和运行环境
-      description: "e.g. macOS 15 / Python 3.12, Ubuntu 24.04 / Docker, Windows 11 / desktop 1.0.5, iOS 18 / iPhone 15 / 例如 macOS 15 / Python 3.12，Ubuntu 24.04 / Docker，Windows 11 / 桌面版 1.0.5，iOS 18 / iPhone 15"
+      description: "e.g. macOS 15 / Python 3.12, Ubuntu 24.04 / Docker, Windows 11 / desktop 1.0.9, iOS 18 / iPhone 15 / 例如 macOS 15 / Python 3.12，Ubuntu 24.04 / Docker，Windows 11 / 桌面版 1.0.9，iOS 18 / iPhone 15"
   - type: textarea
     id: logs
     attributes:

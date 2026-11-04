@@ -10,7 +10,22 @@ import io.github.nanomuse.avatar.ImageGen
 import io.github.nanomuse.cloud.NanoMuseCloud
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.json.JSONArray
+
+/** Media exposed by a relay: never from public Cloud, only from a self-hosted relay's live menu. */
+object RelayMediaPolicy {
+    private fun isPublicCloud(baseUrl: String): Boolean {
+        val url = baseUrl.trim().toHttpUrlOrNull() ?: return false
+        return url.scheme == "https" && url.host == "cloud.nanomuse.cn" && url.port == 443
+    }
+
+    fun available(baseUrl: String, menuIds: Collection<String>, candidates: Collection<String>): List<String> {
+        if (isPublicCloud(baseUrl)) return emptyList()
+        val menu = menuIds.toSet()
+        return candidates.filter { it in menu }.distinct()
+    }
+}
 
 /**
  * The three models nanoMuse runs on. Muse ships with all of them built in; here each is one of
@@ -49,16 +64,29 @@ object MediaModels {
     // ── video ─────────────────────────────────────────────────────────────
 
     /**
-     * Providers whose host speaks Model Studio's asynchronous video API: Model Studio itself, and
-     * nanoMuse Cloud, which relays those same paths (the account's own key is used).
+     * Providers whose host speaks Model Studio's asynchronous video API: Model Studio itself,
+     * and a self-hosted relay only when its current menu advertises a video model.
      */
     fun eligibleVideoInstances(context: Context): List<ProviderInstance> {
         val app = context.applicationContext as? MinisApp ?: return emptyList()
         val repo = app.providerRepositoryOrNull ?: return emptyList()
         val cloudId = NanoMuseCloud.instance(context)?.id
+        val relayModels = if (cloudId == null) {
+            emptyList()
+        } else {
+            RelayMediaPolicy.available(
+                NanoMuseCloud.baseUrl(context),
+                NanoMuseCloud.menuModelIds(context),
+                repo.config.value.modelEntries
+                    .filter { it.providerInstanceId == cloudId }
+                    .map { it.model.id },
+            )
+        }
+        val relayCanVideo = relayModels.any(VideoGen::looksLikeVideoModel)
         return repo.config.value.instances.filter { inst ->
             inst.isEnabled && inst.credentialType == ProviderCredential.apiKey &&
-                (VideoGen.speaksDashScope(ImageGen.baseUrlOf(inst)) || inst.id == cloudId) &&
+                (VideoGen.speaksDashScope(ImageGen.baseUrlOf(inst)) ||
+                    (inst.id == cloudId && relayCanVideo)) &&
                 // C11: the catalogue's word on the vendor (Bailian has video models; a gateway on the same host is not gated)
                 io.github.nanomuse.cloud.Capabilities.allows(context, inst, io.github.nanomuse.cloud.ProviderCatalogue.VIDEO)
         }
@@ -82,9 +110,10 @@ object MediaModels {
      * The video model, or null when there is none. The one chosen (Settings → Models, or →
      * Image & video models); with nothing chosen, in the Models page's order (0.1.41,
      * [io.github.nanomuse.models.SlotOrder]): the chat provider's own video model when the
-     * chat provider is the person's own and makes clips, else nanoMuse Cloud's when signed
-     * in, else the first own provider that can. Off stays off. [automatic] leaves the choice
-     * (and Off) aside and answers what that order gives now, for the picker's *Automatic* row.
+     * chat provider is the person's own and makes clips, else a relay whose live menu
+     * advertises video, else the first own provider that can. Off stays off. [automatic]
+     * leaves the choice (and Off) aside and answers what that order gives now, for the
+     * picker's *Automatic* row.
      */
     fun videoEndpoint(context: Context, automatic: Boolean = false): VideoGen.Endpoint? {
         val app = context.applicationContext as? MinisApp ?: return null
@@ -128,7 +157,27 @@ object MediaModels {
 
     private const val KEY_VIDEO_AVAILABLE = "media.video.available."
     private const val KEY_VIDEO_CHECKED = "media.video.checked."
+    private const val KEY_VIDEO_CANDIDATES = "media.video.candidates."
     private const val VIDEO_CHECK_TTL_MS = 24 * 60 * 60_000L
+
+    /**
+     * The models the person listed on [inst] that make video — the entry's output modalities
+     * say `video`, or the name does ([VideoGen.isVideoEntry]). An entry added by hand counts
+     * the same as one the provider listed: it is the person's own word, so the pickers offer
+     * it whether or not a probe has confirmed it (#508).
+     */
+    fun videoEntries(context: Context, inst: ProviderInstance): List<String> {
+        val app = context.applicationContext as? MinisApp ?: return emptyList()
+        val repo = app.providerRepositoryOrNull ?: return emptyList()
+        return repo.config.value.modelEntries
+            .filter { it.providerInstanceId == inst.id && !it.isHidden && VideoGen.isVideoEntry(it.model.id, it.model.outputModalities) }
+            .map { it.model.id }
+            .distinct()
+    }
+
+    /** What [checkVideoModels] would probe now: the known models of this build, then the person's own entries. */
+    private fun videoCandidates(context: Context, inst: ProviderInstance): List<String> =
+        (VideoGen.KNOWN_DASHSCOPE_MODELS + videoEntries(context, inst)).distinct()
 
     /**
      * The video models of [inst] that answered the last check, recommended first; null when it
@@ -142,23 +191,40 @@ object MediaModels {
         return List(arr.length()) { arr.optString(it) }.filter { it.isNotBlank() }
     }
 
-    fun videoCheckIsFresh(context: Context, inst: ProviderInstance): Boolean =
-        System.currentTimeMillis() - prefs(context).getLong(KEY_VIDEO_CHECKED + inst.id, 0L) < VIDEO_CHECK_TTL_MS
+    /**
+     * What the pickers offer for [inst]: the models the last check found ([found], by default
+     * the remembered answer; none when never checked) plus every video entry the person
+     * listed on the provider. Empty only when nothing was found and nothing is listed.
+     */
+    fun videoChoices(context: Context, inst: ProviderInstance, found: List<String>? = availableVideoModels(context, inst)): List<String> =
+        merge(found, videoEntries(context, inst))
+
+    /** The pure core of [videoChoices]: the probe's word first, the person's entries after, each once. */
+    internal fun merge(found: List<String>?, listed: List<String>): List<String> = (found.orEmpty() + listed).distinct()
 
     /**
-     * Asks the host which of the known video models exist for this key — plus anything on the
-     * provider's own list that is named like a video model — and remembers the answer. Returns
-     * the models found, or null when the host could not be reached at all.
+     * True while the last check stands: it is less than a day old *and* it probed the same
+     * candidates a check would probe now. A model entry added since, or a build that knows a
+     * new model, makes the remembered answer stale, so the pages check again instead of
+     * showing yesterday's list for another day (#508).
+     */
+    fun videoCheckIsFresh(context: Context, inst: ProviderInstance): Boolean {
+        val p = prefs(context)
+        return System.currentTimeMillis() - p.getLong(KEY_VIDEO_CHECKED + inst.id, 0L) < VIDEO_CHECK_TTL_MS &&
+            p.getString(KEY_VIDEO_CANDIDATES + inst.id, null) == JSONArray(videoCandidates(context, inst)).toString()
+    }
+
+    /**
+     * Asks the host which of the known video models exist for this key — plus the video
+     * entries on the provider's own list — and remembers the answer along with what was asked.
+     * Returns the models found, or null when the host could not be reached at all.
      */
     suspend fun checkVideoModels(context: Context, inst: ProviderInstance): List<String>? = withContext(Dispatchers.IO) {
         val app = context.applicationContext as? MinisApp ?: return@withContext null
         val repo = app.providerRepositoryOrNull ?: return@withContext null
         val key = repo.usableApiKey(inst) ?: return@withContext null
         val host = VideoGen.Endpoint(inst, key, "").host
-        val listed = repo.config.value.modelEntries
-            .filter { it.providerInstanceId == inst.id && !it.isHidden && VideoGen.looksLikeVideoModel(it.model.id) }
-            .map { it.model.id }
-        val candidates = (VideoGen.KNOWN_DASHSCOPE_MODELS + listed).distinct()
+        val candidates = videoCandidates(context, inst)
         var reached = false
         val found = candidates.filter { model ->
             val ok = VideoGen.probe(host, key, model)
@@ -168,6 +234,7 @@ object MediaModels {
         if (!reached) return@withContext null
         prefs(context).edit()
             .putString(KEY_VIDEO_AVAILABLE + inst.id, JSONArray(found).toString())
+            .putString(KEY_VIDEO_CANDIDATES + inst.id, JSONArray(candidates).toString())
             .putLong(KEY_VIDEO_CHECKED + inst.id, System.currentTimeMillis())
             .apply()
         found

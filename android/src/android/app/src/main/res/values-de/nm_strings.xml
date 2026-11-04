@@ -132,6 +132,9 @@
     <string name="nm_routine_paused">Aus</string>
     <!-- The chat row a routine sent: its label and the clock time it fired -->
     <string name="nm_routine_wake_caption">Routine · %1$s · %2$s</string>
+    <!-- One scheduled task, several times a day (GH#557) -->
+    <string name="nm_scheduled_task_add_time">Weitere Uhrzeit hinzufügen</string>
+    <string name="nm_scheduled_task_runs_scheduled_for">Geplant für %1$s</string>
 
     <!-- Ideas tab -->
     <string name="nm_ideas_title">Ideen</string>
@@ -323,6 +326,9 @@
     <string name="nm_avatar_menu_model">Bildmodell</string>
     <string name="nm_avatar_menu_regenerate_moods">Stimmungen neu zeichnen</string>
     <string name="nm_avatar_menu_reset">Zurück zum eingebauten Gesicht</string>
+    <string name="nm_avatar_menu_export">In Galerie speichern</string>
+    <string name="nm_avatar_export_done">In der Galerie unter nanoMuse/avatar gespeichert: Bilder %1$d, Clips %2$d</string>
+    <string name="nm_avatar_export_failed">Es konnte nichts in der Galerie gespeichert werden</string>
     <string name="nm_avatar_mood_idle">In Ruhe</string>
     <string name="nm_avatar_mood_working">Arbeitet</string>
     <string name="nm_avatar_mood_waiting">Wartet auf dich</string>
@@ -334,6 +340,16 @@
     <string name="nm_avatar_retry">Erneut versuchen</string>
     <string name="nm_avatar_describe_title">Ein neues Gesicht beschreiben</string>
     <string name="nm_avatar_describe_body">Ein Satz genügt: was es ist, was es trägt, wie es sich anfühlt. Wähle einen Stil, und dein Bildmodell zeichnet vier zur Auswahl.</string>
+    <string name="nm_avatar_preset_moss_name">Mooskurier</string>
+    <string name="nm_avatar_preset_moss_description">ein kleiner, mit weichem Moos bedeckter Kurier mit Blattohren und einer schlichten Segeltuchtasche</string>
+    <string name="nm_avatar_preset_tide_name">Gezeiten-Tüftler</string>
+    <string name="nm_avatar_preset_tide_description">ein meeresschaumgrüner Axolotl-Tüftler mit korallenfarbenen Kiemen und schlichter Werkzeugtasche</string>
+    <string name="nm_avatar_preset_dusk_name">Dämmerfalter</string>
+    <string name="nm_avatar_preset_dusk_description">ein nachdenklicher indigoblauer Nachtfalter mit pfirsichfarbenen Flügelflecken, cremefarbenem Kragen und runder Brille</string>
+    <string name="nm_avatar_preset_copper_name">Kupfereichel</string>
+    <string name="nm_avatar_preset_copper_description">ein kleiner eichelförmiger Automat aus Kupfer mit salbeigrünen Feldern und gedeckt blauem Schal</string>
+    <string name="nm_avatar_preset_a11y">Option %1$d: %2$s, %3$s</string>
+    <string name="nm_avatar_preset_ai">KI-generierte Inspiration</string>
     <string name="nm_avatar_default_description">Ein pummeliger blassgelber Babydrache mit winzigen orangefarbenen Hörnern und kleinen gefalteten Flügeln</string>
     <string name="nm_avatar_style_flat">Flach</string>
     <string name="nm_avatar_style_clay">3D-Knete</string>
@@ -352,7 +368,7 @@
     <string name="nm_avatar_pick_body">Du kannst jederzeit vier weitere zeichnen lassen; die alten bleiben, bis du das tust.</string>
     <string name="nm_avatar_use_this">Dieses verwenden</string>
     <string name="nm_avatar_use_this_hint">Die Stimmungen (arbeitet, wartet, fertig, hoppla) werden als Nächstes daraus gezeichnet, im Hintergrund.</string>
-    <string name="nm_avatar_footer">Bilder liegen auf diesem Telefon unter minis-global/nanomuse/avatar. Jedes Gesicht kostet fünf Bilder bei deinem Anbieter: das gewählte plus vier Stimmungen.</string>
+    <string name="nm_avatar_footer">Bilder liegen im eigenen Speicher der App auf diesem Telefon, den kein Dateimanager öffnen kann. „In Galerie speichern“ im Menü kopiert das Gesicht, seine Stimmungen und Clips nach Pictures und Movies unter nanoMuse/avatar. Jedes Gesicht kostet fünf Bilder bei deinem Anbieter: das gewählte plus vier Stimmungen.</string>
     <string name="nm_own_clip_title">Dein eigener Clip</string>
     <string name="nm_own_clip_body">Ein kurzes Video von dir läuft als Gesicht im Ruhezustand, und die anderen Stimmungen greifen darauf zurück. MP4 oder MOV mit H.264-Video, höchstens 15 Sekunden und 30 MB; es läuft stumm in einer Schleife.</string>
     <string name="nm_own_clip_on">Dein Clip ist aktiv und läuft für jede Stimmung; wo ein Standbild gezeigt wird, bleiben die gezeichneten Bilder. „Standardgesicht“ entfernt ihn.</string>
@@ -615,6 +631,12 @@
     <string name="nm_risk_title_device">Darf „%1$s“ dieses Telefon bedienen?</string>
     <string name="nm_risk_desc_device">„%1$s“, ein anderes Gerät auf deinem Konto, möchte auf diesem Telefon %2$s. Was genau, steht unten. „Immer“ lässt dieses Gerät so etwas hier ohne Nachfrage tun; nimm es unter Berechtigungen zurück.</string>
     <string name="nm_risk_preview_device">Was das Gerät angefragt hat</string>
+    <string name="nm_risk_title_scheduled">Darf %1$s diesen Schritt auf „%2$s“ ausführen?</string>
+    <string name="nm_risk_desc_scheduled">Die geplante Aufgabe „%1$s“ läuft auf „%2$s“ und wartet auf deine Antwort. Der Schritt läuft dort, nicht auf diesem Telefon.</string>
+    <string name="nm_risk_desc_scheduled_app">Die geplante Aufgabe „%1$s“ läuft auf „%2$s“ und will in %3$s handeln. Sie wartet auf deine Antwort; der Schritt läuft dort, nicht auf diesem Telefon.</string>
+    <string name="nm_risk_preview_scheduled">Der Schritt auf dem Computer</string>
+    <string name="nm_risk_allow_task">Immer in dieser Aufgabe</string>
+    <string name="nm_risk_task_remembered_toast">Auf „%1$s“ gespeichert: Diese Aufgabe fragt dort nicht mehr. Widerrufen unter Einstellungen → Berechtigungen auf diesem Computer.</string>
     <string name="nm_risk_preview_show_all">Alle anzeigen (%1$d Zeilen)</string>
     <string name="nm_risk_preview_show_less">Weniger anzeigen</string>
     <string name="nm_risk_class_remote">Fernsteuerung</string>
@@ -823,16 +845,21 @@
     <string name="nm_cloud_ev_contribute_default">Datenkontrolle: für neue Konten an</string>
     <string name="nm_data_title">Datenkontrolle</string>
     <string name="nm_data_improve">Die KI-Modelle von nanoMuse verbessern helfen</string>
-    <string name="nm_data_why">Solange das an ist, wird der Text deiner Chats mit den Modellen von nanoMuse Cloud (was du geschrieben hast, was es geantwortet hat und welche Werkzeuge es aufgerufen hat) auf dem Relay behalten, um das eigene offene Modell der Community zu trainieren. Nicht dein Gedächtnis oder SOUL (der Systemprompt), nicht, was Werkzeuge zurückgegeben haben, keine Bilder, und nie zusammen damit, wer du bist. Dein eigener API-Schlüssel läuft nie über das Relay.</string>
+    <string name="nm_data_why">Solange das an ist, geht der Text dieser Chats (was du geschrieben hast, was das Modell geantwortet hat und welche Werkzeuge es aufgerufen hat) auch in den Trainingssatz für das eigene offene Modell der Community: ohne dein Gedächtnis oder SOUL (den Systemprompt), ohne das, was Werkzeuge zurückgegeben haben, ohne Bilder und ohne, wer du bist. Aus: nichts weiter kommt hinzu; die Aufzeichnung selbst bleibt, bis du sie löschst. Runden mit deinem eigenen Schlüssel sind in der Aufzeichnung, nie im Trainingssatz.</string>
+    <string name="nm_data_record_why">nanoMuse Cloud behält jede Runde deiner Chats mit seinen Modellen vollständig als Aufzeichnung deines Kontos: was an das Modell ging, was es geantwortet hat, die Werkzeuge und was sie zurückgegeben haben, die Bilder als Dateien. Ab der App 1.0.7 kommen auch Runden dazu, die mit deinem eigenen Schlüssel beantwortet wurden. Es sind deine Daten: nur deine Geräte und wer das Relay betreibt, können sie lesen.</string>
+    <string name="nm_data_record_held">Die Aufzeichnung enthält %1$d Runden dieses Kontos (%2$d mit deinen eigenen Schlüsseln), mit %3$d Bildern.</string>
+    <string name="nm_data_record_empty">Die Aufzeichnung enthält noch nichts von diesem Konto.</string>
+    <string name="nm_data_record_keep_days">Dieses Relay behält eine Runde %1$d Tage lang.</string>
+    <string name="nm_data_record_keep_forever">Sie bleibt, bis du sie löschst.</string>
     <string name="nm_data_default_on">Neue Konten beginnen damit an.</string>
     <string name="nm_data_default_off">Neue Konten beginnen damit aus.</string>
     <string name="nm_data_kept">Bisher %1$d Runden behalten.</string>
     <string name="nm_data_on_toast">An. Schalte es hier jederzeit aus.</string>
-    <string name="nm_data_off_toast">Aus. Nichts weiter wird behalten.</string>
-    <string name="nm_data_delete">Behaltene Gespräche löschen</string>
-    <string name="nm_data_delete_sub">Entfernt jede von diesem Konto behaltene Runde, egal ob der Schalter gerade an oder aus ist. Den Schalter auszuschalten behält das Behaltene, bis du es hier löschst.</string>
-    <string name="nm_data_delete_confirm">Die behaltenen Gespräche werden vom Server entfernt. Das lässt sich nicht rückgängig machen.</string>
-    <string name="nm_data_deleted">%1$d Runden gelöscht.</string>
+    <string name="nm_data_off_toast">Aus. Nichts weiter kommt in den Trainingssatz.</string>
+    <string name="nm_data_delete">Aufzeichnung und behaltene Unterhaltungen löschen</string>
+    <string name="nm_data_delete_sub">Entfernt die Aufzeichnung der Chats dieses Kontos und jede davon behaltene Trainingsrunde, egal ob der Schalter gerade an oder aus ist. Den Schalter auszuschalten behält das Behaltene, bis du es hier löschst.</string>
+    <string name="nm_data_delete_confirm">Die Aufzeichnung deiner Chats und die behaltenen Trainingsrunden werden vom Server entfernt. Das lässt sich nicht rückgängig machen.</string>
+    <string name="nm_data_deleted">Gelöscht: %1$d Runden der Aufzeichnung, %2$d Dateien, %3$d Trainingsrunden.</string>
     <string name="nm_data_sign_in">Melde dich bei nanoMuse Cloud an, um das zu nutzen.</string>
     <string name="nm_data_privacy">Datenschutzerklärung</string>
     <string name="nm_data_status_on">An</string>
@@ -1039,6 +1066,8 @@
     <string name="nm_sync_side_title">Auch Nebenchats synchronisieren</string>
     <string name="nm_sync_side_sub">Aus: Nebenchats bleiben auf diesem Gerät. An: Die Nebenchats dieses Geräts gehen ins Konto, und die Nebenchats der anderen Geräte kommen hierher.</string>
     <string name="nm_sync_working">%1$s arbeitet daran…</string>
+    <string name="nm_sync_working_step">%1$s arbeitet daran: %2$s</string>
+    <string name="nm_sync_waiting">%1$s wartet auf dich</string>
     <string name="nm_devices_ask">Dieses Gerät fragen</string>
     <string name="nm_devices_ask_hint">Tippe auf ein Gerät, das online ist, um es aus dem Chat anzuschreiben: Die Nachricht beginnt mit @ und seinem Namen, und dieses Gerät erledigt die Arbeit.</string>
     <string name="nm_reach_the_provider">der Anbieter</string>
@@ -1117,7 +1146,6 @@
     <string name="nm_cloud_provider_no_delete">Dieser Anbieter ist dein nanoMuse-Cloud-Konto. Schalte ihn oben aus, um seine Modelle nicht mehr zu verwenden; zum Abmelden öffne Einstellungen › nanoMuse Cloud.</string>
     <string name="nm_welcome_own_key">Stattdessen eigenen API-Schlüssel verwenden</string>
     <string name="nm_useit_title">Wofür verwenden</string>
-    <string name="nm_useit_body">Wähle, was dieser Schlüssel übernehmen soll. Den Rest übernimmt weiterhin nanoMuse Cloud.</string>
     <string name="nm_useit_body_signed_out">Wähle, was dieser Schlüssel übernehmen soll.</string>
     <string name="nm_useit_use">Verwenden</string>
     <string name="nm_useit_not_now">Jetzt nicht</string>
@@ -1157,4 +1185,44 @@
     <string name="nm_font_scale_medium">Mittel</string>
     <string name="nm_font_scale_large">Groß</string>
     <string name="nm_font_scale_extra_large">Sehr groß</string>
+
+    <!-- nanoMuse: backup choices and the headless run (#560, #561) -->
+    <string name="nm_backup_chat_files">Dateien in den Chats</string>
+    <string name="nm_backup_chat_files_on">Jeder Anhang, jede Offload- und Arbeitsbereichsdatei reist mit den Nachrichten.</string>
+    <string name="nm_backup_chat_files_off">Nur Nachrichten. Die Dateien werden aufgelistet, aber nicht mitgenommen; eine Wiederherstellung bringt die Chats ohne sie zurück. Hält das Paket klein für einen Server, der große Uploads ablehnt.</string>
+    <string name="nm_backup_hint_too_large">Der Server hat das Paket wegen seiner Größe abgelehnt. Meist ist das sein Upload-Limit (nginx: client_max_body_size); erhöhe es, oder sichere die Chats ohne ihre Dateien.</string>
+    <string name="nm_backup_delivery_failed">Zustellung fehlgeschlagen.</string>
+    <string name="nm_backup_run_needs_passphrase">Die Verschlüsselung ist an, und die Passphrase wird auf der Backup-Seite eingegeben; ein Lauf aus der Shell kann nicht danach fragen. Starte das Backup auf der Seite oder schalte die Verschlüsselung dort aus.</string>
+    <string name="nm_backup_run_started">Backup aus der Shell gestartet.</string>
+
+    <!-- The line under the typing dots while the model has not said anything yet -->
+    <string name="nm_wait_busy">Das Modell ist ausgelastet, bisher %1$d s</string>
+    <string name="nm_wait_queued">%1$d vor dir, bisher %2$d s</string>
+    <string name="nm_wait_next">Du bist als Nächstes dran, bisher %1$d s</string>
+    <string name="nm_fb_up">Gute Antwort</string>
+    <string name="nm_fb_down">Keine gute Antwort</string>
+    <string name="nm_fb_why">Was war falsch?</string>
+    <string name="nm_fb_reason_wrong">Falsch</string>
+    <string name="nm_fb_reason_unhelpful">Nicht hilfreich</string>
+    <string name="nm_fb_reason_unsafe">Das hätte nicht passieren dürfen</string>
+    <string name="nm_fb_reason_slow">Zu langsam</string>
+    <string name="nm_fb_reason_other">Etwas anderes</string>
+    <string name="nm_fb_skip">Überspringen</string>
+    <string name="nm_fb_thanks">Notiert, danke</string>
+    <string name="nm_stop_why">Warum hast du abgebrochen?</string>
+    <string name="nm_stop_reason_wrong">Es lief in die falsche Richtung</string>
+    <string name="nm_stop_reason_slow">Zu langsam</string>
+    <string name="nm_stop_reason_changed_mind">Ich habe es mir anders überlegt</string>
+    <string name="nm_stop_reason_done">Es war schon fertig</string>
+    <string name="nm_stop_reason_other">Etwas anderes</string>
+    <string name="nm_feed_limit_notice">%1$d generierte Beiträge passten wegen des Tageslimits von 12 nicht mehr hinein.</string>
+
+    <!-- Context maintenance -->
+    <string name="nm_context_compacting">Der Kontext wird gekürzt (geschätzt %1$d / %2$d Tokens).</string>
+    <string name="nm_context_compact_deferred">Der Kontext konnte nicht gekürzt werden. Die Verarbeitung wird fortgesetzt, da er noch in das Kontextfenster des Modells passt.</string>
+    <string name="nm_context_limit_reached">Der Kontext ist nahe am Modelllimit und konnte nicht gekürzt werden. Versuche erneut, ihn zu kürzen, oder starte einen neuen Chat.</string>
+    <string name="nm_context_compact_timeout">Das Kürzen des Kontexts wurde nach %1$d Sekunden abgebrochen (%2$d Modellaufrufe).</string>
+    <string name="nm_context_compact_idle_timeout">Die Komprimierung wurde nach %1$d Sekunden ohne Antwort gestoppt (%2$d Modellaufrufe).</string>
+    <string name="nm_context_compact_no_gain">Die Zusammenfassung hat den Kontext nicht verkürzt. Der ursprüngliche Inhalt wurde beibehalten.</string>
+    <string name="nm_context_compact_incomplete">Das Modell hat keine vollständige Zusammenfassung zurückgegeben. Der ursprüngliche Kontext wurde beibehalten.</string>
 </resources>

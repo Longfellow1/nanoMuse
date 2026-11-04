@@ -28,7 +28,9 @@ from typing import Any
 
 from nanomuse import __version__
 from nanomuse.computer.screen import BlackScreen, take_screenshot
+from nanomuse.stdio import decode_output
 from nanomuse.tools.base import number_arg
+from nanomuse.tools.files import refuses_windows_path
 from nanomuse.tools.shell import kill_tree, scrubbed_env
 
 OUTPUT_LIMIT = 200_000
@@ -47,7 +49,13 @@ class ActionError(Exception):
 
 
 def expand(path: str | None) -> Path:
-    return Path(os.path.expandvars(os.path.expanduser(path or "~"))).resolve()
+    expanded = os.path.expandvars(os.path.expanduser(path or "~"))
+    if path:
+        # Check every component before resolve() can normalize the requested spelling.
+        reason = refuses_windows_path(expanded)
+        if reason:
+            raise ActionError("bad_name", reason)
+    return Path(expanded).resolve()
 
 
 def shell_name() -> str:
@@ -56,25 +64,36 @@ def shell_name() -> str:
     return os.environ.get("SHELL", "/bin/sh")
 
 
-def info(extra_actions: tuple[str, ...] = ()) -> dict[str, Any]:
-    return {
+def info(extra_actions: tuple[str, ...] = (), *, operable: bool = True) -> dict[str, Any]:
+    """What this computer says about itself to another device of the account. With remote
+    control off (``operable=False``) it is the device's name, system and software only:
+    the account name, the home directory, the working directory and the shell are what a
+    caller would need to operate it, and the person here said no to that."""
+    out: dict[str, Any] = {
         "name": socket.gethostname(),
         "kind": "computer",
         "os": platform.system(),
         "os_version": platform.release(),
         "arch": platform.machine(),
-        "user": getpass.getuser(),
-        "home": str(Path.home()),
-        "cwd": os.getcwd(),
-        "shell": shell_name(),
-        "python": platform.python_version(),
         "runtime": __version__,
-        "actions": [*ACTIONS, *extra_actions],
+        "actions": [*ACTIONS, *extra_actions] if operable else ["info"],
     }
+    if operable:
+        out.update(
+            {
+                "user": getpass.getuser(),
+                "home": str(Path.home()),
+                "cwd": os.getcwd(),
+                "shell": shell_name(),
+                "python": platform.python_version(),
+            }
+        )
+    return out
 
 
 def _text(b: bytes) -> str:
-    s = b.decode("utf-8", errors="replace")
+    # this computer's own console wrote it: 936 on a Chinese Windows, not UTF-8
+    s = decode_output(b)
     if len(s) > OUTPUT_LIMIT:
         s = s[:OUTPUT_LIMIT] + f"\n… [{len(s) - OUTPUT_LIMIT} more characters not shown]"
     return s
@@ -130,24 +149,29 @@ def _entry(p: Path, st: os.stat_result) -> dict[str, Any]:
     return {"name": p.name, "type": kind, "size": st.st_size, "mtime": int(st.st_mtime)}
 
 
+FILES_MAX = 2000
+
+
 def files(path: str | None = None) -> dict[str, Any]:
     p = expand(path)
     if not p.exists():
         raise ActionError("not_found", f"{p} does not exist")
     if p.is_file():
         return {"path": str(p), "entries": [_entry(p, p.stat())]}
-    entries = []
+    entries: list[dict[str, Any]] = []
     try:
         children = sorted(p.iterdir(), key=lambda c: (not c.is_dir(), c.name.lower()))
     except PermissionError as exc:
         raise ActionError("forbidden", f"cannot read {p}") from exc
     for child in children:
         try:
-            entries.append(_entry(child, child.lstat()))
+            entry = _entry(child, child.lstat())
         except OSError:
             continue
-        if len(entries) >= 2000:
-            break
+        if len(entries) >= FILES_MAX:
+            # Only an additional readable entry proves that the listing was capped.
+            return {"path": str(p), "entries": entries, "truncated": True, "total": len(children)}
+        entries.append(entry)
     return {"path": str(p), "entries": entries}
 
 

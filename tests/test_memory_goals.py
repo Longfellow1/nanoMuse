@@ -50,6 +50,39 @@ def test_forget_matching_is_literal_and_undoable(tmp_path: Path):
     store.close()
 
 
+def test_forget_by_id_is_logged_and_undoable(tmp_path: Path):
+    store = MemoryStore(tmp_path / "m.db")
+    a = store.add("Prefers window seats on flights", "preference")
+    store.add("Works at Acme in Shanghai", "profile")
+    assert store.forget(a.id)
+    assert store.count() == 1
+    # the deletion is one logged change naming the line, like a tidy-up drop
+    change = store.history(1)[0]
+    assert change.action == "forget" and change.after is None
+    assert [m.content for m in change.before] == ["Prefers window seats on flights"]
+    # and the line comes back on restore
+    assert store.restore(change.id) is not None
+    assert store.get(a.id) is not None and store.count() == 2
+    # forgetting what is not there logs nothing
+    n = len(store.history())
+    assert not store.forget("m_nope") and len(store.history()) == n
+    store.close()
+
+
+def test_matching_lists_what_a_query_would_forget(tmp_path: Path):
+    store = MemoryStore(tmp_path / "m.db")
+    store.add("Works at Acme in Shanghai", "profile")
+    store.add("Acme project kickoff on Monday", "project")
+    store.add("Prefers window seats", "preference")
+    assert {m.content for m in store.matching("acme")} == {
+        "Works at Acme in Shanghai",
+        "Acme project kickoff on Monday",
+    }
+    assert store.matching("  ") == []
+    assert store.matching("nothing alike") == []
+    store.close()
+
+
 def test_memory_relevant_prefers_matches(tmp_path: Path):
     store = MemoryStore(tmp_path / "m.db")
     for i in range(30):
@@ -171,6 +204,15 @@ def test_goals_tool_rates_creating_a_goal_as_a_change(tmp_path: Path):
 
     tool = Goals(store=GoalStore(tmp_path / "g.db"))
     assert tool.assess({"action": "create", "title": "Sell my old car"}).risk == RiskLevel.MODERATE
+    # so are closing it and rewriting what it is
+    assert (
+        tool.assess({"action": "set_status", "goal_id": "g_1", "status": "done"}).risk
+        == RiskLevel.MODERATE
+    )
+    assert (
+        tool.assess({"action": "update", "goal_id": "g_1", "due": "2026-12-01"}).risk
+        == RiskLevel.MODERATE
+    )
     for args in (
         {"action": "list"},
         {"action": "get", "goal_id": "g_1"},

@@ -115,6 +115,24 @@ test('a thread from other devices in the hero layout is bottom-aligned by an aut
   assert.doesNotMatch(css, /\.nm-remote:first-child \{ margin-top: 16px/)
 })
 
+test('an active chat keeps the hidden composer dock space without moving the hero composer (#494)', () => {
+  const active = 'html[data-nm-muse] [data-conversation-content][data-content-phase="active"] [data-composer-card]'
+  assert.match(rule(active), /margin-bottom:\s*26px !important/)
+  for (const line of css.split('\n').filter((l) => l.includes('margin-bottom: 26px'))) {
+    assert.ok(line.includes('[data-content-phase="active"]'), line)
+    assert.ok(!line.includes('[data-content-phase="hero"]'), line)
+  }
+})
+
+test('the compact model control remains available for reasoning levels (#537)', () => {
+  assert.doesNotMatch(
+    css,
+    /\[data-slot="conversation\.input\.model"\][^{]*\{[^}]*display:\s*none/,
+    'the default Muse view must not hide the compact model and reasoning control',
+  )
+  assert.match(css, /\[data-composer-card\] \[class\*="_modes"\] \{ display: none !important; \}/)
+})
+
 test('under prefers-reduced-motion every breathing light is steady', () => {
   const reduced = css.split('\n').filter((l) => l.startsWith('@media (prefers-reduced-motion: reduce)'))
   assert.ok(reduced.length >= 2)
@@ -122,6 +140,15 @@ test('under prefers-reduced-motion every breathing light is steady', () => {
   assert.ok(steady, 'the trajectory light is covered')
   for (const sel of ['.nm-chat-dot.nm-live', '.nm-status-dot.nm-live', '.nm-remote-working::before', '.nm-mic.nm-live', 'html[data-nm-muse] [data-chat-running]::after']) assert.ok(steady.includes(sel), sel)
   assert.match(steady, /animation: none; opacity: 1;/)
+})
+
+test('a folded thinking row in the fit-content agent bubble keeps a width (#683)', () => {
+  const bubble = 'html[data-nm-muse] [data-chat-flow-kind="assistant-step"] [data-slot="conversation.chat.node"] > [class*="_root"] > [class*="_body"]'
+  assert.match(rule(bubble), /width:\s*fit-content/)
+  // the harness folds the row with `contain: size`, which sizes it as if empty: 0 wide in that bubble
+  const think = rule(`${bubble} [data-variant="think"]:not([data-expanded])`)
+  assert.match(think, /contain:\s*layout;/)
+  assert.doesNotMatch(think, /size/)
 })
 
 test('in the Muse look the chat is monochrome: ink pills, grey agent pills, the send disc the same ink', () => {

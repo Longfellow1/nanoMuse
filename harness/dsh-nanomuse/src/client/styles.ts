@@ -257,6 +257,9 @@ html[data-nm-platform='darwin']:not([data-nm-fullscreen]) .nm-col-top { height: 
    where no scroll reaches it (#261: a long thread from the phone could not be scrolled up at all);
    an auto margin takes the free space while there is some and is nothing once the thread is taller
    than the body, so the body scrolls from its first line. */
+/* The standing answers above the chat's approval card for a hands step (ApprovalScopes.ts). */
+.nm-ap-scope { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; box-sizing: border-box; width: min(var(--dsh-composer-card-max-width, 712px), 100%); margin: 0 auto 6px; padding: 0 var(--dsh-composer-side-clearance, 16px); }
+.nm-ap-scope-label { font-size: 13px; color: var(--dsw-alias-label-tertiary); margin-right: 2px; }
 [data-conversation-content][data-content-phase="hero"] > [data-conversation-scroll]:has(.nm-remote, .nm-traj) { justify-content: flex-start; }
 [data-conversation-content][data-content-phase="hero"] > [data-conversation-scroll] > .nm-remote { flex: 0 0 auto; width: min(var(--dsh-chat-content-width, 680px), 100%); align-self: center; box-sizing: border-box; padding: 0 var(--dsh-composer-side-clearance, 16px); }
 [data-conversation-content][data-content-phase="hero"] > [data-conversation-scroll] > :is(.nm-remote, .nm-traj):not(:is(.nm-remote, .nm-traj) ~ :is(.nm-remote, .nm-traj)) { margin-top: auto; padding-top: 16px; }
@@ -313,6 +316,9 @@ html[data-nm-muse] [data-composer-card] > [data-input-scroll] { flex: 1 1 120px;
 html[data-nm-muse] [data-composer-card] > [data-input-scroll] [contenteditable] { min-height: 34px !important; padding: 5px 6px 5px 8px !important; }
 html[data-nm-muse] [data-composer-card] [data-composer-placeholder] { inset: 5px 6px auto 8px !important; color: transparent !important; }
 html[data-nm-muse] [data-composer-card] [data-composer-placeholder]::before { content: var(--nm-placeholder, "Message"); position: absolute; inset: 0 auto auto 0; color: var(--dsw-alias-label-tertiary); white-space: nowrap; }
+/* The hidden harness dock normally gives an active chat 26px below the card; keep that
+   breathing room without adding it to the hero composer, which has its own 32px padding. */
+html[data-nm-muse] [data-conversation-content][data-content-phase="active"] [data-composer-card] { margin-bottom: 26px !important; }
 /* An empty chat: no greeting, the composer sits at the bottom like Muse's. */
 html[data-nm-muse] [data-conversation-scroll]:has([class*="_composerHero"]) { justify-content: flex-end; }
 html[data-nm-muse] [class*="_composerHero"] > [class*="_root"]:first-child { display: none; }
@@ -324,9 +330,9 @@ html[data-nm-muse] [data-composer-card] > div:last-child > div:last-child { orde
 html[data-nm-muse] [data-composer-card] > [class*="_rail"] { flex-basis: 100%; order: -2; }
 html[data-nm-muse] [data-composer-card] > [class*="_accessory"] { flex-basis: 100%; order: -3; padding-top: 4px !important; }
 html[data-nm-muse] [data-composer-card] [class*="_modes"] { display: none !important; }
-/* the right-hand seats stay for the microphone; the model picker goes (Settings keeps it) */
+/* Keep the harness's compact model control: for models that expose reasoning levels it is
+   the one lightweight place to change the level for this chat. The other harness controls stay hidden. */
 html[data-nm-muse] [data-composer-card] [class*="_standardControls"] { gap: 2px !important; }
-html[data-nm-muse] [data-composer-card] [data-slot="conversation.input.model"] { display: none !important; }
 html[data-nm-muse] [data-composer-card] [class*="_activity"] { display: none !important; }
 html[data-nm-muse] [data-composer-card] [class*="_add"] { width: 34px; height: 34px; border-radius: 50%; color: var(--dsw-alias-label-secondary); }
 /* the send disc is the ink (black in the light, white in the dark) with the arrow in the opposite colour */
@@ -361,9 +367,8 @@ html[data-nm-muse] [data-chat-flow-kind="turn-tail"] [class*="_endInfo"] > :not(
 html[data-nm-muse] [data-chat-flow-kind="turn-tail"] [data-clock="end"] > button[class*="_action"]:nth-of-type(2) { display: none !important; }
 .nm-quote-act { width: 24px; height: 24px; border: 0; padding: 0; border-radius: 6px; background: transparent; color: var(--dsw-alias-label-tertiary); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
 .nm-quote-act:hover { background: var(--nm-hover); color: var(--dsw-alias-label-primary); }
-/* the time of a message sits centred over it, small and grey, as Muse's do */
-html[data-nm-muse] [data-chat-flow-kind="user"] [class*="_userRow"] { position: relative; margin-top: 18px; }
-html[data-nm-muse] [data-chat-flow-kind="user"] [data-clock="start"] { position: absolute; left: 0; right: 0; top: -18px; justify-content: center; opacity: 1 !important; }
+/* Keep the clock and actions in the message's layout, below its text and attachments. */
+html[data-nm-muse] [data-chat-flow-kind="user"] [data-clock="start"] { position: static; align-self: flex-end; justify-content: flex-end; flex-wrap: wrap; height: auto; min-height: 28px; max-width: 100%; opacity: 1 !important; }
 html[data-nm-muse] [data-chat-flow-kind="user"] [data-clock="start"] [class*="_timeStart"] { font-size: 11px; color: var(--dsw-alias-label-dimmed); }
 html[data-nm-muse] [data-chat-flow-kind="user"] [data-clock="start"] button { opacity: 0; transition: opacity 160ms; }
 html[data-nm-muse] [data-chat-flow-kind="user"]:hover [data-clock="start"] button, html[data-nm-muse] [data-chat-flow-kind="user"] [data-clock="start"] button:focus-visible { opacity: 1; }
@@ -380,6 +385,10 @@ html[data-nm-muse] [data-chat-flow-kind="assistant-step"] [data-slot="conversati
 html[data-nm-muse] [data-chat-flow-kind="assistant-step"] [data-slot="conversation.chat.node"] > [class*="_root"] > [class*="_body"]:empty { display: none; }
 html[data-nm-muse] [data-chat-flow-kind="assistant-step"] [data-slot="conversation.chat.node"] > [class*="_root"] > [class*="_body"] > [class*="_markdown"] > :first-child { margin-top: 0; }
 html[data-nm-muse] [data-chat-flow-kind="assistant-step"] [data-slot="conversation.chat.node"] > [class*="_root"] > [class*="_body"] > [class*="_markdown"] > :last-child { margin-bottom: 0; }
+/* A folded thinking row in the bubble: the harness fixes its height with contain: size, which
+   also leaves it no width of its own; in a fit-content bubble that width is 0, and the row was an
+   empty grey pill that took no clicks (#683). Layout containment only; the height still holds. */
+html[data-nm-muse] [data-chat-flow-kind="assistant-step"] [data-slot="conversation.chat.node"] > [class*="_root"] > [class*="_body"] [data-variant="think"]:not([data-expanded]) { contain: layout; }
 /* Timestamps and per-message actions appear on hover, as Muse keeps its chat quiet. */
 html[data-nm-muse] [data-chat-flow-kind="user"] [class*="_actions"][data-clock],
 html[data-nm-muse] [data-chat-flow-kind="turn-tail"] [class*="_actions"][data-clock] { opacity: 0; transition: opacity 160ms; }
@@ -617,13 +626,22 @@ html[data-nm-platform='darwin']:not([data-nm-fullscreen]) .nm-pf-top { padding-t
 .nm-settings-overlay { position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center; }
 .nm-settings-mask { position: absolute; inset: 0; background: var(--dsw-alias-bg-mask-1, rgba(0,0,0,0.3)); }
 .nm-settings { position: relative; width: min(900px, calc(100vw - 48px)); height: min(620px, calc(100vh - 48px)); display: flex; border-radius: 18px; overflow: hidden; background: var(--nm-base); color: var(--dsw-alias-label-primary); box-shadow: 0 24px 80px rgba(0,0,0,0.35), 0 0 0 1px var(--nm-divider); outline: none; }
-.nm-settings-nav { width: 212px; flex: none; display: flex; flex-direction: column; background: var(--nm-base); border-right: 1px solid var(--nm-divider); padding: 18px 10px 12px; box-sizing: border-box; overflow: auto; }
-.nm-settings-title { font-size: 16px; font-weight: 600; padding: 0 10px 12px; outline: none; }
+.nm-settings-nav { width: 212px; flex: none; display: flex; flex-direction: column; background: var(--nm-base); border-right: 1px solid var(--nm-divider); padding: 0 10px 12px; box-sizing: border-box; overflow: auto; }
+.nm-settings-title { font-size: 16px; font-weight: 600; padding: 18px 10px 12px; outline: none; }
+.nm-settings-search { position: sticky; top: 0; z-index: 2; padding: 0 0 8px; background: var(--nm-base); }
+.nm-settings-search-box { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 10px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-tertiary); }
+.nm-settings-search-box:focus-within { background: var(--nm-card); box-shadow: 0 0 0 1px var(--nm-field-border); }
+.nm-settings-search-input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--dsw-alias-label-primary); font: inherit; font-size: 13px; outline: none; }
+.nm-settings-search-input::placeholder { color: var(--dsw-alias-label-tertiary); }
+.nm-settings-results { display: flex; flex-direction: column; }
+.nm-settings-empty { padding: 10px; font-size: 13px; color: var(--dsw-alias-label-tertiary); }
+.nm-settings-hit { background: color-mix(in srgb, var(--nm-accent) 26%, transparent); border-radius: 3px; }
 .nm-settings-group { font-size: 11.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--dsw-alias-label-tertiary); padding: 12px 10px 6px; }
 .nm-settings-cell { display: flex; align-items: center; gap: 10px; width: 100%; border: 0; text-align: left; padding: 8px 10px; border-radius: 10px; background: transparent; color: var(--dsw-alias-label-secondary); font: inherit; font-size: 14px; cursor: pointer; }
 .nm-settings-cell:hover { background: var(--nm-hover); color: var(--dsw-alias-label-primary); }
 .nm-settings-cell.nm-active { background: var(--dsw-alias-bg-layer-3); color: var(--dsw-alias-label-primary); }
 .nm-settings-cell.nm-danger { color: var(--dsw-alias-state-error-primary, #d2453d); }
+.nm-settings-cell.nm-match { background: color-mix(in srgb, var(--nm-accent) 18%, transparent); color: var(--dsw-alias-label-primary); }
 .nm-settings-cell svg { flex: none; }
 .nm-settings-cell-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .nm-settings-foot { margin-top: auto; padding-top: 10px; }
@@ -672,6 +690,20 @@ html[data-nm-platform='darwin']:not([data-nm-fullscreen]) .nm-pf-top { padding-t
 .nm-headsup-text { flex: 1; min-width: 0; }
 .nm-headsup-text .nm-ob-link.nm-inline { color: var(--nm-blue); font-weight: 600; font-size: 12.5px; }
 .nm-headsup-close { width: 22px; height: 22px; flex: none; }
+.nm-waitline { display: flex; align-items: center; gap: 10px; margin: 0 0 6px; padding: 0 12px; font-size: 12px; line-height: 1.4; color: var(--dsw-alias-label-tertiary); }
+.nm-waitline .nm-ob-link.nm-inline { color: var(--nm-blue); font-weight: 600; font-size: 12px; }
+/* The thumbs beside a reply (0.31) sit with the quote button in the tail's seat; the reason chips open to their right. */
+.nm-thumbs { display: inline-flex; align-items: center; gap: 2px; flex-wrap: wrap; }
+.nm-thumb { width: 24px; height: 24px; border: 0; padding: 0; border-radius: 6px; background: transparent; color: var(--dsw-alias-label-tertiary); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.nm-thumb:hover { background: var(--nm-hover); color: var(--dsw-alias-label-primary); }
+.nm-thumb.nm-on { color: var(--dsw-alias-label-primary); }
+.nm-fb-reasons { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-left: 6px; font-size: 12px; color: var(--dsw-alias-label-tertiary); }
+.nm-fb-why, .nm-fb-thanks { font-size: 12px; color: var(--dsw-alias-label-tertiary); margin-left: 6px; }
+.nm-fb-chip { padding: 3px 9px; font-size: 12px; }
+.nm-fb-reasons .nm-ob-link.nm-inline, .nm-stopask .nm-ob-link.nm-inline { color: var(--nm-blue); font-weight: 600; font-size: 12px; }
+/* The question after a Stop, above the composer, in the wait line's place. */
+.nm-stopask { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 0 0 6px; padding: 0 12px; font-size: 12px; line-height: 1.4; color: var(--dsw-alias-label-tertiary); }
+.nm-stopask-text { margin-right: 4px; }
 .nm-star-card { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border-radius: var(--nm-radius); background: var(--nm-card); border: 1px solid var(--nm-divider); }
 .nm-star-head { display: flex; gap: 10px; align-items: flex-start; }
 .nm-star-icon { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex: none; background: color-mix(in srgb, var(--nm-accent) 18%, transparent); color: var(--nm-accent); }
@@ -842,6 +874,7 @@ html[data-nm-platform='darwin']:not([data-nm-fullscreen]) .nm-room-top { height:
 .nm-room-inner { max-width: 920px; margin: 0 auto; padding: 4px 40px 48px; box-sizing: border-box; }
 .nm-room-h2 { font-size: 15px; font-weight: 600; margin: 26px 0 8px; }
 .nm-room-error { font-size: 13px; color: var(--dsw-alias-state-error-primary, #d2453d); padding: 8px 0; }
+.nm-room-notice { font-size: 13px; color: var(--dsw-alias-label-secondary); padding: 8px 0; }
 .nm-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; min-height: 320px; text-align: center; color: var(--dsw-alias-label-tertiary); }
 .nm-empty-icon { display: inline-flex; color: var(--dsw-alias-label-dimmed); }
 .nm-empty-text { font-size: 14px; }
@@ -1058,11 +1091,15 @@ html[data-nm-platform='darwin']:not([data-nm-fullscreen]) .nm-lib-col-top { heig
 
 /* ---- the avatar studio ---- */
 .nm-st-label { font-size: 12.5px; font-weight: 600; color: var(--dsw-alias-label-secondary); margin: 12px 0 6px; }
+.nm-st-preset-ai { margin: 4px 0 8px; color: var(--dsw-alias-label-secondary); font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
 .nm-st-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.nm-st-cell { position: relative; aspect-ratio: 1; border-radius: 16px; overflow: hidden; border: 0; padding: 0; background: var(--nm-card); box-shadow: inset 0 0 0 1px var(--nm-field-border); cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.nm-st-cell { position: relative; border-radius: 16px; overflow: hidden; border: 0; padding: 0 0 8px; background: var(--nm-card); box-shadow: inset 0 0 0 1px var(--nm-field-border); cursor: pointer; display: flex; flex-direction: column; align-items: stretch; text-align: left; }
 .nm-st-cell:disabled { cursor: default; }
-.nm-st-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.nm-st-cell img, .nm-st-cell video { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
 .nm-st-cell.nm-active { box-shadow: 0 0 0 3px var(--nm-accent); }
+.nm-st-preset-name, .nm-st-preset-style { overflow: hidden; padding: 0 10px; text-overflow: ellipsis; white-space: nowrap; }
+.nm-st-preset-name { margin-top: 7px; color: var(--dsw-alias-label-primary); font-size: 12px; font-weight: 600; }
+.nm-st-preset-style { margin-top: 2px; color: var(--dsw-alias-label-secondary); font-size: 11px; }
 .nm-st-tag { position: absolute; left: 10px; bottom: 10px; padding: 2px 8px; border-radius: 999px; background: rgba(0,0,0,0.55); color: #fff; font-size: 11.5px; }
 .nm-st-wait { font-size: 28px; color: var(--dsw-alias-label-tertiary); }
 .nm-st-moods { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin: 6px 0 14px; }
@@ -1160,7 +1197,7 @@ html[data-nm-platform='darwin']:not([data-nm-fullscreen]) .nm-lib-col-top { heig
 .nm-menu-item-label { flex: 1; min-width: 0; }
 .nm-menu-sep { height: 1px; margin: 4px 6px; background: var(--nm-divider); }
 .nm-menu-hint { font-size: 11px; color: var(--dsw-alias-label-tertiary); }
-.nm-ask { width: min(420px, calc(100vw - 32px)); padding: 12px 14px; border-radius: 14px; background: var(--dsw-alias-bg-primary, #fff); color: var(--dsw-alias-label-primary, inherit); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18); border: 1px solid var(--nm-divider); display: flex; flex-direction: column; gap: 8px; }
+.nm-ask { box-sizing: border-box; width: min(420px, calc(100vw - 32px)); padding: 12px 14px; border-radius: 14px; background: var(--nm-card); color: var(--dsw-alias-label-primary); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18); border: 1px solid var(--nm-divider); display: flex; flex-direction: column; gap: 8px; }
 .nm-ask-title { font-size: 12px; font-weight: 600; color: var(--dsw-alias-label-secondary); }
 .nm-ask-text { font-size: 14px; line-height: 1.4; word-break: break-word; }
 .nm-ask-actions { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -1355,6 +1392,9 @@ html[data-nm-muse] [data-conversation-scroll]:has(> .nm-intro-host) [class*="_co
 .nm-naming-row.nm-selected { border: 1.5px solid var(--nm-blue); color: var(--nm-blue); }
 .nm-naming-row.nm-dimmed { opacity: 0.4; }
 .nm-naming-custom { border-style: dashed; color: var(--dsw-alias-label-tertiary); background: transparent; }
+.nm-naming input { flex: 1; min-width: 0; border: none; outline: none; background: transparent; color: var(--dsw-alias-label-primary); font: inherit; font-size: 15px; padding: 0; }
+.nm-naming-confirm { flex: none; padding: 5px 12px; border-radius: 9px; border: 1px solid var(--nm-divider); background: var(--nm-base); color: var(--dsw-alias-label-primary); font: inherit; font-size: 13.5px; cursor: pointer; }
+.nm-naming-confirm:disabled { opacity: 0.5; cursor: default; }
 
 /* The Feed (C5): the intro card, the "how" card under the empty state, the routine row in the sliders. */
 .nm-feed-intro { display: flex; flex-direction: column; gap: 8px; margin: 0 0 14px; padding: 14px 16px; border-radius: var(--nm-radius); background: var(--nm-card); border: 1px solid var(--nm-divider); }

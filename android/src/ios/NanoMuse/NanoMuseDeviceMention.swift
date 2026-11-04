@@ -44,8 +44,40 @@ enum NanoMuseDeviceMention {
         return nil
     }
 
-    /// Runs the mention when there is one: the person's line goes into the chat, the device's
-    /// answer follows when it comes. Returns false when the text does not address a device.
+    /// The online devices the `@` menu offers, above the files: only when the `@` opens the
+    /// message (that is the only place `parse` looks), name starting with what was typed after it,
+    /// or containing it. Picking one writes "@<name> ", which `parse` then reads at send.
+    @MainActor
+    static func menuEntries(text: String, anchor: Int, filter: String) -> [FileMentionEntry] {
+        let nsText = text as NSString
+        guard anchor >= 0, anchor <= nsText.length,
+              nsText.substring(to: anchor).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return [] }
+        let query = filter.lowercased()
+        let devices = NanoMuseHub.shared.others.filter { d in
+            let name = d.name.trimmingCharacters(in: .whitespaces)
+            return d.online && !name.isEmpty && (query.isEmpty || name.lowercased().contains(query))
+        }
+        let ranked = devices.sorted { a, b in
+            let pa = a.name.lowercased().hasPrefix(query), pb = b.name.lowercased().hasPrefix(query)
+            if pa != pb { return pa }
+            return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
+        }
+        return ranked.map { d in
+            FileMentionEntry(
+                linuxPath: d.name, scope: .mount, mountName: AppLocalized("device"),
+                modifiedAt: d.lastSeen ?? Date(), isDirectory: false,
+                nmDevice: NanoMuseMentionDevice(
+                    symbol: d.isPhone ? "iphone" : "desktopcomputer",
+                    detail: [d.os, AppLocalized("online")].filter { !$0.isEmpty }.joined(separator: " · ")
+                )
+            )
+        }
+    }
+
+    /// Runs the mention when there is one: the person's line goes into the chat, then the device's
+    /// reply, drawn while that device works (NanoMuseDeviceReply). Returns false when the text
+    /// does not address a device.
     @MainActor
     static func handle(_ text: String, in vm: AIChatViewModel) -> Bool {
         guard let hit = parse(text) else { return false }
@@ -58,6 +90,7 @@ enum NanoMuseDeviceMention {
         }
         let notes = Notes()
         let sessionId = vm.sessionId ?? vm.draftId ?? "draft"
+        let live = NanoMuseDeviceReply(device: device, vm: vm)
         Task { @MainActor in
             do {
                 let reply = try await NanoMuseHub.shared.call(
@@ -65,15 +98,18 @@ enum NanoMuseDeviceMention {
                     action: "task",
                     // `language` (runtime 1.0.0, docs/hub.md): the Muse over there answers in
                     // this phone's language instead of guessing from the text; older runtimes ignore it.
-                    args: ["text": task, "from": NanoMuseHub.shared.name, "language": NanoMuseLocale.tag],
-                    timeout: 600
+                    // `stream`: the reply draws a `text` in place (NanoMuseDeviceReply), so the
+                    // computer may send a message's text while its model writes it; others ignore it.
+                    args: ["text": task, "from": NanoMuseHub.shared.name, "language": NanoMuseLocale.tag, "stream": true],
+                    timeout: 600,
+                    id: live.callId
                 ) { body in
-                    guard let stage = body["stage"] as? String, let id = body["approval_id"] as? String else { return }
+                    guard let stage = body["stage"] as? String else { return }
                     switch stage {
                     case "approval":
                         // That Muse asks whether it may do something risky. The question is answered
                         // here, where the task was typed (docs/hub.md): the card, or a remembered answer.
-                        guard let question = NanoMuseRemoteQuestion(body: body) else { return }
+                        guard let id = body["approval_id"] as? String, let question = NanoMuseRemoteQuestion(body: body) else { return }
                         Task { @MainActor in
                             let outcome = await NanoMuseRemoteApprovals.shared.decide(question, from: device, sessionId: sessionId)
                             switch outcome {
@@ -86,23 +122,38 @@ enum NanoMuseDeviceMention {
                         }
                     case "approval_result":
                         // Decided at the other device, or expired there: the card here goes.
+                        guard let id = body["approval_id"] as? String else { return }
                         Task { @MainActor in NanoMuseRemoteApprovals.shared.settled(id) }
                     default:
-                        break
+                        // A step starting or done, what that Muse says along the way: drawn as it comes.
+                        Task { @MainActor in live.apply(body) }
                     }
                 }
-                var answer = (reply["text"] as? String) ?? (reply["answer"] as? String) ?? ""
-                if answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { answer = AppLocalized("Done") }
+                var answer = ((reply["text"] as? String) ?? (reply["answer"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                // Nothing came back: a task that did not run (a chat that refused the step, #718),
+                // or one whose Muse ended it without a word. "Done" here read as work that had
+                // happened; the steps above say what did happen, and this line says the answer did not come.
+                if answer.isEmpty {
+                    let reason = String(format: AppLocalized("%@ finished without an answer."), device.name)
+                    await live.finish(header: nil, answer: reason, replacing: false, completion: .failed(reason))
+                    return
+                }
                 if notes.declined > 0 {
                     answer += "\n\n" + String(format: AppLocalized("%@ asked for permission for a step and did not get it from here."), device.name)
                 }
                 if notes.standing > 0 {
                     answer += "\n\n" + AppLocalized("A step ran on a standing approval given on this phone; Approvals on the agent's page lists it.")
                 }
-                vm.nmLocalTurn(assistant: String(format: AppLocalized("%@ answered:"), device.name) + "\n\n" + answer)
+                await live.finish(header: String(format: AppLocalized("%@ answered:"), device.name), answer: answer, replacing: true, completion: .answered)
             } catch {
-                let reason = NanoMuseHubErrors.describe(error)
-                vm.nmLocalTurn(assistant: String(format: AppLocalized("%@ did not answer: %@"), device.name, reason))
+                if live.stopped {
+                    await live.finish(header: nil, answer: AppLocalized("Stopped."), replacing: false, completion: .stopped)
+                } else {
+                    // A failed call can have completed earlier steps. Describe the failure without
+                    // claiming the task never started; an empty answer must not read as "Done".
+                    let reason = NanoMuseHubErrors.describe(error)
+                    await live.finish(header: nil, answer: String(format: AppLocalized("%@ did not answer: %@"), device.name, reason), replacing: false, completion: .failed(reason))
+                }
             }
         }
         return true
@@ -114,4 +165,12 @@ enum NanoMuseDeviceMention {
         var declined = 0
         var standing = 0
     }
+}
+
+/// What a row of the `@` menu needs to show a device instead of a file (`FileMentionEntry.nmDevice`).
+struct NanoMuseMentionDevice: Hashable {
+    /// The SF Symbol: a phone or a computer.
+    let symbol: String
+    /// "Darwin 25.5.0 · online", the line under the name.
+    let detail: String
 }

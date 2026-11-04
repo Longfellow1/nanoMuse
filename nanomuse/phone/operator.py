@@ -27,6 +27,7 @@ original Qwen ``mobile_use`` tool restored and our device actions on the other e
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import itertools
 import json
 import re
@@ -36,8 +37,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from nanomuse import prompts
 from nanomuse.agent.holds import HAND_OVER_TIMEOUT_S, Holds, took_over_note
 from nanomuse.config import GUISettings
+from nanomuse.llm import budget as task_budget
+from nanomuse.llm import session as llm_session
 from nanomuse.llm.base import BaseLLM
 from nanomuse.logger import logger
 from nanomuse.phone.link import STOP_MARKER, DeviceError, DeviceGone, DeviceStopped, PhoneLink
@@ -323,6 +327,7 @@ class Outcome:
     actions: list[str] = field(default_factory=list)
     trace_id: str = ""
     noun: str = "phone"  # what was operated: "phone" or "computer"
+    budget: dict[str, Any] = field(default_factory=dict)
 
     def report(self) -> str:
         n = self.noun
@@ -684,6 +689,17 @@ COMPUTER = Dialect(
 # ------------------------------------------------------------------ the operator
 
 
+def _screen_key(screen: Screen) -> str:
+    """The same coordinates on a different page are progress, not a repeated click."""
+    state = json.dumps([screen.app, screen.route, screen.nodes], sort_keys=True)
+    if not screen.nodes and screen.image_path:
+        try:
+            state += hashlib.sha256(Path(screen.image_path).read_bytes()).hexdigest()
+        except OSError:
+            pass
+    return state
+
+
 class PhoneOperator:
     def __init__(
         self,
@@ -759,20 +775,95 @@ class PhoneOperator:
             trace.end(outcome)
             return outcome
 
+        budget_token = task_budget.begin(self.settings.budget)
+        budget = task_budget.current()
+        assert budget is not None
+        remaining = (
+            budget.limits.max_seconds - (time.monotonic() - budget.started)
+            if budget.limits.max_seconds
+            else None
+        )
+        deadline = asyncio.timeout(max(0, remaining) if remaining is not None else None)
         try:
             # inside the try: a cancel that lands while the capsule is being told "begin"
             # must still be followed by the end, or the link would keep the task for good
-            await self.link.task_event("begin", goal)
-            await self._steps(instruction, app, outcome, trace)
+            async with deadline:
+                budget.check()
+                await self.link.task_event("begin", goal)
+                # every model call names the trace and step (relay 0.31)
+                with llm_session.trajectory(trace.id):
+                    await self._steps(instruction, app, outcome, trace)
+        except (task_budget.BudgetExceeded, TimeoutError) as exc:
+            if isinstance(exc, TimeoutError) and not deadline.expired():
+                raise
+            reason = exc.reason if isinstance(exc, task_budget.BudgetExceeded) else "time"
+            budget.stopped = reason
+            outcome.status = "failed"
+            reply_language = language or self._run_language or ""
+            if reply_language in ("", "auto"):
+                reply_language = "zh" if prompts.detect_language(goal) == "Chinese" else "en"
+            outcome.message = task_budget.BudgetExceeded(reason).message(reply_language)
         finally:
             # Whatever way the task ended — done, a question, Stop, a device that went away,
             # a model that failed, the chat run cancelled — the capsule on the device hears
             # that it is over. Left on the screen it would stay on its last step for good.
+            outcome.budget = budget.snapshot()
+            task_budget.end(budget_token)
             try:
                 trace.end(outcome)
             finally:
                 await self._task_over(outcome)
+                self._note_outcome(trace.id, outcome)
         return outcome
+
+    @staticmethod
+    def _note_step(
+        trace_id: str, step_no: int, params: dict[str, Any], result: ToolResult, latency_ms: int
+    ) -> None:
+        """One step of the run as a client event (``hands.step``): the kind of action, how
+        it went, how long the model took; nothing of the screen, the text typed or the goal."""
+        try:
+            from nanomuse.telemetry import telemetry
+
+            if result.error and STOP_MARKER in result.error:
+                outcome = "stopped"
+            elif result.error and "Sentinel blocked" in result.error:
+                outcome = "refused"
+            elif result.error:
+                outcome = "failed"
+            else:
+                outcome = "ok"
+            telemetry.event(
+                "hands.step",
+                {
+                    "trajectory": trace_id,
+                    "step": step_no,
+                    "action": str(params.get("action") or "")[:32],
+                    "outcome": outcome,
+                    "latency_ms": int(latency_ms),
+                },
+            )
+        except Exception:  # noqa: BLE001 - a note, never the step
+            pass
+
+    @staticmethod
+    def _note_outcome(trace_id: str, outcome: Outcome) -> None:
+        """How the run ended, as a client event (``hands.step`` with ``action: end``: the
+        number of steps and the status; nothing of the screen or the goal)."""
+        try:
+            from nanomuse.telemetry import telemetry
+
+            telemetry.event(
+                "hands.step",
+                {
+                    "trajectory": trace_id,
+                    "step": outcome.steps,
+                    "action": "end",
+                    "outcome": outcome.status,
+                },
+            )
+        except Exception:  # noqa: BLE001 - a note, never the outcome
+            pass
 
     async def _task_over(self, outcome: Outcome) -> None:
         """``notice`` when the user has to come to the chat; ``end`` for everything else.
@@ -792,7 +883,7 @@ class PhoneOperator:
     async def _steps(self, instruction: str, app: str, outcome: Outcome, trace: Trace) -> None:
         """The loop itself: ``outcome`` is filled in whichever way it ends."""
         steps: list[str] = []  # the "Action:" sentences, with results appended
-        recent: list[dict[str, Any]] = []  # the last device actions, to notice loops
+        recent: list[tuple[str, dict[str, Any]]] = []  # observations and actions, to notice loops
         try:
             if app:
                 await self._act({"action": "open_app", "app": app, "label": f"open {app}"}, outcome)
@@ -820,6 +911,7 @@ class PhoneOperator:
         )
         for step_no in step_numbers:
             outcome.steps = step_no
+            llm_session.set_trajectory_step(step_no)
             outcome.last_screen = screen.render()
             outcome.last_image = screen.image_path
             if not screen.image_path:
@@ -925,8 +1017,11 @@ class PhoneOperator:
                 continue
             assert params is not None
 
-            recent.append(params)
-            if len(recent) >= 3 and all(_same_action(recent[-3], r) for r in recent[-2:]):
+            recent.append((_screen_key(screen), params))
+            if len(recent) >= 3 and all(
+                recent[-3][0] == key and _same_action(recent[-3][1], action)
+                for key, action in recent[-2:]
+            ):
                 steps.append(
                     f"{entry}; Note: this same action was taken three times with no visible "
                     "change; try another way, or terminate with status failure"
@@ -951,6 +1046,7 @@ class PhoneOperator:
                 params=params,
                 error=result.error,
             )
+            self._note_step(trace.id, step_no, params, result, latency_ms)
             if result.error and STOP_MARKER in result.error:
                 outcome.status = "stopped"
                 outcome.message = str(DeviceStopped())
@@ -1038,6 +1134,9 @@ class PhoneOperator:
         return None, raw, int((time.monotonic() - started) * 1000)
 
     async def _act(self, params: dict[str, Any], outcome: Outcome) -> ToolResult:
+        budget = task_budget.current()
+        if budget is not None:
+            budget.check()
         call = ToolCall(
             function=Function(
                 name=self.act_tool.name, arguments=json.dumps(params, ensure_ascii=False)

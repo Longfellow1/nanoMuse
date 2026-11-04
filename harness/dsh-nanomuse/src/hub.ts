@@ -40,6 +40,21 @@ export interface HelloDevice {
   os: string
   version: string
   actions: string[]
+  /**
+   * Relay 0.28, optional: the ids this device runs its chats under (`cloud` for the relay's
+   * models, else the catalogue id of the person's own key) and the model id. Plain ids only;
+   * never a key or a URL. The operator's console counts them in aggregate (docs/hub.md).
+   */
+  llm?: { provider: string; model: string }
+}
+
+/** `[A-Za-z0-9._:/-]{1,80}` and no scheme: what `HelloDevice.llm` may carry; anything else is left out. */
+const LLM_ID = /^[A-Za-z0-9._:/-]{1,80}$/
+
+/** `llm` for a hello when both ids are plain, else nothing (the hello goes out without it). */
+export function helloLlm(provider: string, model: string): HelloDevice['llm'] {
+  if (!LLM_ID.test(provider) || !LLM_ID.test(model) || provider.includes('://') || model.includes('://')) return undefined
+  return { provider, model }
 }
 
 export interface Caller {
@@ -78,12 +93,20 @@ export class HubError extends Error {
   }
 }
 
+/** The events the client listens for, with the fields it reads of each. */
+export interface SocketEvents {
+  open: unknown
+  message: { data: unknown }
+  error: unknown
+  close: { code?: number; reason?: string }
+}
+
 /** The subset of the WebSocket API the client uses; Node 22's global and a test double both fit. */
 export interface SocketLike {
   readyState: number
   send(data: string): void
   close(code?: number, reason?: string): void
-  addEventListener(type: 'open' | 'message' | 'close' | 'error', listener: (event: any) => void): void
+  addEventListener<K extends keyof SocketEvents>(type: K, listener: (event: SocketEvents[K]) => void): void
 }
 
 export interface HubClientOptions {
@@ -120,6 +143,8 @@ export class HubClient {
   /** The id the relay confirmed in `welcome`; absent while disconnected. */
   deviceId: string | undefined
   connected = false
+  /** What the relay understands beyond the frames every version has (`welcome.server.features`, relay 0.31). */
+  features: string[] = []
   /** The reason the last connection ended, for the UI. */
   lastError: string | undefined
 
@@ -285,6 +310,17 @@ export class HubClient {
     this.send({ type: 'devices' })
   }
 
+  /**
+   * An event with no call behind it (relay 0.31, `event_push`): to one device or to `'*'`, and
+   * the relay passes it only to the devices announcing `approve.any`. False when the relay
+   * does not take pushes or the socket is down; nothing is queued.
+   */
+  push(to: string, body: Record<string, unknown>): boolean {
+    if (!this.connected || !this.features.includes('event_push')) return false
+    this.send({ type: 'event', to, body })
+    return true
+  }
+
   // -- the socket -----------------------------------------------------------------------
 
   private async connect(): Promise<void> {
@@ -375,6 +411,8 @@ export class HubClient {
       case 'welcome': {
         this.deviceId = String(frame.device_id ?? this.options.device().id)
         this.devices = toDevices(frame.devices)
+        const server = frame.server && typeof frame.server === 'object' ? (frame.server as Record<string, unknown>) : {}
+        this.features = Array.isArray(server.features) ? server.features.filter((f): f is string => typeof f === 'string') : []
         this.attempt = 0
         this.lastError = undefined
         this.setConnected(true)

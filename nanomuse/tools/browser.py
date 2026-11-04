@@ -22,7 +22,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 from pydantic import PrivateAttr
 
@@ -188,6 +188,11 @@ class Browser(BaseTool):
     # the holds registry (nanomuse.agent.holds): the tool waits while the user has the page
     holds: Any = None
     hand_over_timeout: float = HAND_OVER_TIMEOUT_S
+    # An embedding with a browser of its own (a remote browser service, say) hands the tool a
+    # factory: a new session takes the backend it returns instead of Playwright or the phone,
+    # and that backend is driven, shown in the app and closed like the two built-in ones. The
+    # Sentinel sees every URL either way. A Python integration point, not a setting.
+    backend_factory: Callable[[], BrowserBackend] | None = None
 
     _backend: Any = PrivateAttr(default=None)
     _lock: Any = PrivateAttr(default=None)
@@ -207,6 +212,12 @@ class Browser(BaseTool):
         current = self._backend
         if current is not None and current.open:
             return current
+        if self.backend_factory is not None:
+            supplied = self.backend_factory()
+            if not isinstance(supplied, BrowserBackend):
+                raise RuntimeError("the browser's backend_factory did not return a BrowserBackend")
+            self._backend = supplied
+            return supplied
         mode = self.backend_mode
         device_ready = self.link is not None and self.link.browser_device is not None
         if mode == "device" or (mode == "auto" and not playwright_available()):
@@ -242,9 +253,12 @@ class Browser(BaseTool):
 
     @property
     def backend_kind(self) -> str:
-        """Which backend a session would use now: "playwright", "device" or ""."""
+        """Which backend a session would use now: "playwright", "device", an embedding's own
+        ("custom" until it is made, then its kind) or ""."""
         if self._backend is not None and self._backend.open:
             return str(self._backend.kind)
+        if self.backend_factory is not None:
+            return "custom"
         if self.backend_mode == "device":
             return "device" if self.link is not None and self.link.browser_device else ""
         if playwright_available():
@@ -401,12 +415,21 @@ class Browser(BaseTool):
         seconds: float | None = None,
     ) -> ToolResult:
         await backend.ensure()
+        await backend.set_url_guard(self._url_allowed)
         if action == "navigate":
             if not url:
                 return ToolResult.fail("`url` is required")
             if not url.lower().startswith(("http://", "https://")):
                 url = "https://" + url
+            if not await self._url_allowed(url):
+                return ToolResult.fail(f"refusing to navigate to a private or local address: {url}")
             await backend.goto(url)
+            final_url = await backend.url()
+            if not await self._url_allowed(final_url):
+                return ToolResult.fail(
+                    "refusing a navigation whose final URL is a private or local address: "
+                    f"{final_url}"
+                )
             await self._frame(backend, f"Opened {host_of(url) or url}")
             return await self._state(backend, brief=True)
         if action == "extract":
@@ -459,11 +482,32 @@ class Browser(BaseTool):
         if action == "screenshot":
             shots = self.workspace / "screenshots"
             shots.mkdir(parents=True, exist_ok=True)
-            path = shots / f"{time.strftime('%Y%m%d-%H%M%S')}.jpg"
-            path.write_bytes(await backend.screenshot(85))
+            data = await backend.screenshot(85)
+            # two screenshots inside one second (click, then look again) are two pictures:
+            # the second takes the next free name, not the first one's file
+            stem = time.strftime("%Y%m%d-%H%M%S")
+            path = shots / f"{stem}.jpg"
+            n = 2
+            while path.exists():
+                path = shots / f"{stem}-{n}.jpg"
+                n += 1
+            path.write_bytes(data)
             await self._frame(backend, "Took a screenshot")
             return ToolResult(output=f"Screenshot saved to {path}", system=str(path))
         return ToolResult.fail(f"unknown action '{action}'")
+
+    async def _url_allowed(self, url: str) -> bool:
+        """Whether a browser network request stays on globally routable HTTP(S)."""
+        try:
+            scheme = urlparse(url).scheme.lower()
+        except ValueError:
+            return False
+        if scheme not in ("http", "https", "ws", "wss"):
+            return True
+        host = host_of(url)
+        if not host:
+            return False
+        return not await asyncio.to_thread(_is_private_host, host)
 
     async def _fetch(
         self, backend: BrowserBackend, url: str | None, method: str | None, body: str | None
@@ -620,6 +664,11 @@ class Browser(BaseTool):
             return {"url": await backend.url(), "title": await backend.title()}
 
     async def _state(self, backend: BrowserBackend, brief: bool) -> ToolResult:
+        url = await backend.url()
+        if not await self._url_allowed(url):
+            return ToolResult.fail(
+                f"refusing a navigation whose final URL is a private or local address: {url}"
+            )
         max_text = 3000 if brief else 9000
         max_elements = 60 if brief else 150
         elements = await backend.evaluate(_ANNOTATE_JS, max_elements) or []
@@ -627,7 +676,6 @@ class Browser(BaseTool):
         text = " ".join(str(text).split()) if text else ""
         if len(text) > max_text:
             text = text[:max_text] + f" ... [truncated, {len(text)} chars]"
-        url = await backend.url()
         self._last_host = host_of(url) if url else None
         lines = []
         if self._user_actions:

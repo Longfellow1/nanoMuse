@@ -4,6 +4,8 @@
 
 什么都不装进这些助手里，什么都不经过谁的服务器中转。电脑上的运行时或桌面版读取助手留在磁盘上的东西，有新消息时启动它们自己的命令行界面，再把返回的内容流式传回来。另一台设备通过 hub（设备互联）发出请求；hub 只负责传帧。
 
+Windows 上的进程检测会按控制台编码读取非 UTF-8 的命令输出，带重音字符的进程名不会再导致编程助手列表加载失败。
+
 ## 在 App 里 {#in-the-apps}
 
 - **手机**：抽屉里的「编程助手」一行（或「设置 → 编程助手」，或 `nanomuse://coding` 链接）。选一台电脑、一个助手、一个会话；读记录；输入一条消息，看着它跑（文字一边生成一边显示，工具一个个被调用），跑偏了就停掉。
@@ -34,9 +36,13 @@ dsh 也是唯一不只从 `PATH` 上找命令行的助手：桌面版把 harness
 
 运行器在助手的终止事件到达时就停止读取，而不是等到管道 EOF：`cursor-agent` 回答完之后会留一个 worker 服务器跑着，否则这次运行会被永远挂住。随后等待该进程，宽限期过后将其杀掉。
 
+Python 运行时按工作区列出会话时，会先核对记录中的工作区，再限制返回数量。其他项目
+里更新的聊天不会挤掉这个工作区的历史。不同路径可能对应同一个存储目录名，因此以
+会话记录中的工作区为准，不根据目录名猜测归属。
+
 ## 在哪里跑 {#where-it-runs}
 
-每个助手都以它在那台电脑上拥有的权限运行（Codex 在 `workspace-write` 下，Claude Code 带 `acceptEdits`，Cursor 带 `--force`，dsh headless 按它自己的沙箱策略），并且在那里改文件。所以发一条消息被当作在那台电脑上运行一条命令来对待：请求只在同一个账号的设备之间传递，走该账号自己的 hub 会话，而且那台电脑可以完全拒绝远程控制（「远程控制」关掉后，`coding.*` 只在本机可用）。在桌面版上，`coding.send` 和 `coding.stop` 过的是和 `shell`、`files` 同一道关：「远程控制」关着时，尚未信任的设备会在屏幕上弹出一张卡片，由回答（这一次、总是、不行，或没人及时回答）决定；只读动作直接应答，不问。
+每个助手都以它在那台电脑上拥有的权限运行（Codex 在 `workspace-write` 下，Claude Code 带 `acceptEdits`，Cursor 带 `--force`，dsh headless 按它自己的沙箱策略），并且在那里改文件。所以发一条消息被当作在那台电脑上运行一条命令来对待：对哨兵来说 `coding_agents send` 是 `sensitive`，和 `shell` 同级（`ask` 模式下卡片会写明助手、文件夹和消息）；请求只在同一个账号的设备之间传递，走该账号自己的 hub 会话，而且那台电脑可以完全拒绝远程控制（「远程控制」关掉后，`coding.*` 只在本机可用）。在桌面版上，`coding.send` 和 `coding.stop` 过的是和 `shell`、`files` 同一道关：「远程控制」关着时，尚未信任的设备会在屏幕上弹出一张卡片，由回答（这一次、总是、不行，或没人及时回答）决定；只读动作直接应答，不问。
 
 助手自己的 API key 和登录状态是它们自己的；nanoMuse 从不接触。记录是从磁盘读出来给你看的；除了发起请求的那台设备，不会发给任何地方。
 
@@ -52,7 +58,7 @@ POST /api/coding/send    {agent, text, session_id?, workspace?, device?}  → th
 POST /api/coding/stop    {run, device?}
 ```
 
-一次运行是 `{id, agent, session_id, asked_session_id, workspace, text, started_at, ended_at, status, output, resumed, error, tools, device?}`；`status` 是 `running`、`done`、`error` 或 `stopped` 之一。最近 50 次已结束的运行保存在 `<data_dir>/coding/runs.json`，运行时启动时读回来，所以记录能挺过重启；当时还在跑的运行回来时变成 `stopped`，并附一句说明（CLI 进程随运行时一起结束了）。运行期间，总线上传递 `{"kind": "coding", "run": id, …}` 事件，每个打开的 App 都实时跟着：`started {session_id, model}`、`text {text, partial}`（Cursor 先发增量，再发整条消息；App 用最终那条替换掉流式显示的文字）、`tool {text, phase}`、`done`、`error`。
+一次运行是 `{id, agent, session_id, asked_session_id, workspace, text, started_at, ended_at, status, output, resumed, error, tools, device?}`；`status` 是 `running`、`done`、`failed` 或 `stopped` 之一。最近 50 次已结束的运行保存在 `<data_dir>/coding/runs.json`，运行时启动时读回来，所以记录能挺过重启；当时还在跑的运行回来时变成 `stopped`，并附一句说明（CLI 进程随运行时一起结束了）。运行期间，总线上传递 `{"kind": "coding", "run": id, …}` 事件，每个打开的 App 都实时跟着：`started {session_id, model}`、`text {text, partial}`（Cursor 先发增量，再发整条消息；App 用最终那条替换掉流式显示的文字）、`tool {text, phase}`、`done`、`error`。
 
 桌面版把同样的数据形状提供给它自己的窗口，路径在 `nanomuse/cloud/coding` 下（页面的本机回环 API）：`GET`（助手和运行记录）、`GET /sessions`、`GET /sessions/{agent}/{id}`、`POST /send`、`POST /stop`，以及 `GET /events`，上面那些运行事件的服务器推送流。它的 `runs.json` 放在插件数据目录的 `coding/` 下。
 

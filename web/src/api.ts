@@ -250,6 +250,10 @@ export const api = {
   deleteThread: (id: string) => request<{ ok: boolean }>(`/api/threads/${id}`, { method: "DELETE" }),
   clearThread: (id: string) => request<{ ok: boolean }>(`/api/threads/${id}/clear`, { method: "POST" }),
   stopThread: (id: string) => request<{ ok: boolean }>(`/api/threads/${id}/stop`, { method: "POST" }),
+  /** The lightest feedback (relay 0.31): a thumb on a reply (`event` is its id; `vote` "" takes it back;
+   * `reason` a code with a thumb down), or why a Stop was pressed (`stop_reason`, "skipped" included). */
+  feedback: (id: string, body: { event: string; vote: "up" | "down" | ""; reason?: string } | { stop_reason: string }) =>
+    request<{ ok: boolean }>(`/api/threads/${id}/feedback`, json(body)),
   events: (thread: string, limit = 200, before?: string) =>
     request<{ thread: ThreadMeta; events: TimelineEvent[]; has_more: boolean }>(
       `/api/threads/${thread}/events?limit=${limit}${before ? `&before=${encodeURIComponent(before)}` : ""}`,
@@ -321,6 +325,21 @@ export const api = {
     return res.text();
   },
   settings: () => request<SettingsView>("/api/settings"),
+  /**
+   * The agent's data as one zip (parity note 37): the runtime answers with the file itself,
+   * so a browser on another machine gets it too. The name comes from the reply.
+   */
+  exportData: async (): Promise<{ blob: Blob; name: string }> => {
+    const headers: Record<string, string> = {};
+    const token = getToken();
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    const res = await fetch("/api/data/export", { headers });
+    if (res.status === 401) throw new AuthError();
+    if (!res.ok) throw new Error(failureDetail(res.status, await res.json().catch(() => undefined)));
+    const disposition = res.headers.get("content-disposition") ?? "";
+    const name = /filename="([^"]+)"/.exec(disposition)?.[1] ?? "nanomuse-data.zip";
+    return { blob: await res.blob(), name };
+  },
   /** Installed and latest release (a day's cache on the runtime; `refresh` asks now). */
   update: (refresh = false) => request<UpdateView>(`/api/update${refresh ? "?refresh=1" : ""}`),
   /** When the app may ask for a star (contract C1): the relay's policy, through the runtime. */

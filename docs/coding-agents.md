@@ -10,6 +10,8 @@ leave on disk, starts their own command-line interface for a new message, and
 streams what comes back. Another device asks over the hub; the hub only carries
 the frames.
 
+On Windows, process discovery decodes command output using the console encoding when it is not UTF-8. Accented process names no longer interrupt the coding agent list.
+
 ## In the apps
 
 - **Phone**: the drawer's *Coding* row (or *Settings → Coding agents*, or the
@@ -94,12 +96,19 @@ EOF: `cursor-agent` leaves a worker server running after it answers and would
 otherwise hold the run open forever. The process is then waited for and killed
 after a grace period.
 
+When the Python runtime lists sessions for a workspace, it checks each transcript's
+workspace before applying the result limit. Newer chats in other projects do not hide
+that workspace's history. The stored workspace takes priority over a directory name,
+since different paths can map to the same directory name in a coding agent's store.
+
 ## Where it runs
 
 Every agent runs with the permissions it has on that computer (Codex in
 `workspace-write`, Claude Code with `acceptEdits`, Cursor with `--force`, dsh
 headless under its own sandbox policy) and edits files there. Sending a message
-is therefore treated like running a command on that computer: the request travels
+is therefore treated like running a command on that computer: to the Sentinel
+`coding_agents send` is `sensitive`, the same level as `shell` (in `ask` mode the
+card names the agent, the folder and the message), and the request travels
 only between devices of one account, over the account's own hub session, and the
 computer can refuse remote control altogether (*Remote control* off keeps
 `coding.*` local). On the desktop
@@ -126,7 +135,7 @@ POST /api/coding/stop    {run, device?}
 
 A run is `{id, agent, session_id, asked_session_id, workspace, text, started_at,
 ended_at, status, output, resumed, error, tools, device?}`; `status` is `running`,
-`done`, `error` or `stopped`. The last 50 finished runs are kept in
+`done`, `failed` or `stopped`. The last 50 finished runs are kept in
 `<data_dir>/coding/runs.json` and read back when the runtime starts, so the
 record survives a restart; a run that was still going then comes back as
 `stopped` with a note (the CLI process ended with the runtime). While it runs the bus carries `{"kind": "coding", "run":

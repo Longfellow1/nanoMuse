@@ -197,6 +197,12 @@ export interface OwnProvider {
    * vendor wants and speaks each model's own shape, so the row names no `api` and no base URL.
    */
   catalogRoute?: boolean
+  /**
+   * The chat model list was trimmed or edited in the model adapter's settings (`llm-pi-ai`
+   * `providers.<id>.models`) or saved with `catalogOnly`: a later save without new `models`
+   * keeps these chat models instead of merging the endpoint's full `/models` list back in.
+   */
+  customModels?: boolean
 }
 
 export interface OwnModel {
@@ -397,8 +403,9 @@ async function fetchSameOrigin(fetchImpl: typeof fetch, url: string, init: Reque
 
 /**
  * The models an endpoint lists, by protocol: `GET /models` with the key (OpenAI's shape, which
- * the compatible providers speak), `/v1/models` with `x-api-key` for Anthropic, `/models?key=`
- * for Gemini. Empty when it does not answer in time — the catalogue's defaults stand in.
+ * the compatible providers speak), `/v1/models` with `x-api-key` for Anthropic, `/models` with
+ * `x-goog-api-key` for Gemini (the key rides in a header, never in the address, so it stays out
+ * of proxy and access logs). Empty when it does not answer in time — the catalogue's defaults stand in.
  */
 export async function listModels(protocol: Protocol, baseURL: string, apiKey: string, fetchImpl: typeof fetch = fetch, timeoutMs = 8000): Promise<string[]> {
   return (await listModelRows(protocol, baseURL, apiKey, fetchImpl, timeoutMs)).map((m) => m.id)
@@ -420,7 +427,7 @@ export async function listModelRows(protocol: Protocol, baseURL: string, apiKey:
     if (protocol === 'anthropic') {
       request = fetchSameOrigin(fetchImpl, `${base}/v1/models?limit=200`, { headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' }, signal }, Boolean(apiKey))
     } else if (protocol === 'gemini' && apiOf(protocol, base) === 'google-generative-ai') {
-      request = fetchSameOrigin(fetchImpl, `${base}/models?pageSize=200&key=${encodeURIComponent(apiKey)}`, { signal }, Boolean(apiKey))
+      request = fetchSameOrigin(fetchImpl, `${base}/models?pageSize=200`, { headers: apiKey ? { 'x-goog-api-key': apiKey } : {}, signal }, Boolean(apiKey))
     } else {
       request = fetchSameOrigin(fetchImpl, `${base}/models`, { headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {}, signal }, Boolean(apiKey))
     }

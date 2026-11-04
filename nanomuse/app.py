@@ -460,12 +460,14 @@ class NanoMuseApp:
                 self.tools.remove(name)
 
     def trigger_kinds(self) -> dict[str, bool]:
-        """Which trigger kinds have their connector: mail needs the mailbox, event the calendar."""
+        """Which trigger kinds have their connector: mail needs the mailbox, event the
+        calendar, device a Cloud account with this computer joining the hub."""
         s = self.settings
         return {
             "mail": bool(s.connectors.email.enabled and s.connectors.email.imap_host),
             "event": bool(s.connectors.calendar.enabled and s.connectors.calendar.feeds),
             "hook": True,
+            "device": bool(s.hub.enabled and self.cloud_signed_in()),
         }
 
     async def start(self) -> NanoMuseApp:
@@ -505,7 +507,9 @@ class NanoMuseApp:
         if goal.status != "active":
             raise ValueError(f"goal {goal_id} is {goal.status}")
         self.agent.reset()
-        return await self.agent.run(prompts.ADVANCE_GOAL_PROMPT.format(goal=goal.render()))
+        return await self.agent.run(
+            prompts.ADVANCE_GOAL_PROMPT.format(goal=goal.render()), run="goal"
+        )
 
 
 __all__ = ["NanoMuseApp"]

@@ -23,11 +23,22 @@ import subprocess
 import sys
 import tempfile
 import time
-import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = ROOT / "scripts" / "desktop-app" / "nanomuse_runtime.spec"
+
+
+def _clear_dir(path: Path) -> None:
+    # A process the check just terminated can keep its working directory pinned a beat
+    # after wait() returns; retry briefly rather than leave the probe's directories behind.
+    for _ in range(20):
+        shutil.rmtree(path, ignore_errors=True)
+        if not path.exists():
+            return
+        time.sleep(0.05)
+
+
 WORK = ROOT / "build" / "runtime-pyi"
 DIST = ROOT / "build" / "runtime-dist"
 TARGET = ROOT / "harness" / "desktop" / "runtime"
@@ -79,7 +90,7 @@ def check(exe: Path) -> None:
     home = ROOT / "build" / "runtime-check-home"
     cwd = ROOT / "build" / "runtime-check-cwd"
     for d in (home, cwd):
-        shutil.rmtree(d, ignore_errors=True)
+        _clear_dir(d)
     cwd.mkdir(parents=True)
     env = dict(os.environ, NANOMUSE_DATA_DIR=str(home), PYTHONUTF8="1")
     for key in (
@@ -92,6 +103,10 @@ def check(exe: Path) -> None:
         env.pop(key, None)
     # A startup log can exceed a pipe's capacity before the server listens.
     # A regular file also lets the timeout read diagnostics without waiting for EOF.
+    # the health check is a call to this machine: the environment's proxy has no part in it
+    # (a machine behind one polled the proxy instead and never saw the runtime come up)
+    from nanomuse.local_http import local_open
+
     with tempfile.TemporaryFile() as log:
         proc = subprocess.Popen(
             [str(exe), "serve", "--no-qr", "--no-auth", "--port", str(port)],
@@ -106,15 +121,11 @@ def check(exe: Path) -> None:
                 if proc.poll() is not None:
                     break
                 try:
-                    with urllib.request.urlopen(
-                        f"http://127.0.0.1:{port}/api/health", timeout=1
-                    ) as r:
+                    with local_open(f"http://127.0.0.1:{port}/api/health", timeout=1) as r:
                         body = json.loads(r.read())
                         if body.get("ok"):
                             print("health:", body)
-                            with urllib.request.urlopen(
-                                f"http://127.0.0.1:{port}/", timeout=2
-                            ) as r2:
+                            with local_open(f"http://127.0.0.1:{port}/", timeout=2) as r2:
                                 page = r2.read()
                                 assert (
                                     b'<div id="root"' in page
@@ -139,7 +150,7 @@ def check(exe: Path) -> None:
                 proc.kill()
                 proc.wait(10)
             for d in (home, cwd):
-                shutil.rmtree(d, ignore_errors=True)
+                _clear_dir(d)
 
 
 def main() -> None:

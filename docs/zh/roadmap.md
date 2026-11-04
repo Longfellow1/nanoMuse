@@ -20,11 +20,11 @@ Meta 的 Muse 定下了这类智能体的样子；下面是我们还落后于它
 
 ### 主动性 {#proactivity}
 
-目标按计划检查，例程在 App 关着时照样跑，动态每天早上写一篇。三种触发器已经有了（`nanomuse/triggers/`：来了一封邮件、一个快到的日历项、一个 webhook）。还缺的：智能体在两次计划之间自己注意到别的事情，比如一台刚上线的设备，然后判断注意到的事值不值得说一句。
+目标按计划检查，例程在 App 关着时照样跑，动态每天早上写一篇。四种触发器已经有了（`nanomuse/triggers/`：来了一封邮件、一个快到的日历项、一个 webhook、账号下的一台设备上线）。还缺的：智能体在两次计划之间自己注意到别的事情，然后判断注意到的事值不值得说一句。
 
 - 模块：`nanomuse/goals/`、`nanomuse/triggers/`、`nanomuse/nudges.py`；手机的 `io.github.nanomuse.feed` 和 `goals`。
 - 阅读：[every-device.md](every-device.md)，讲一声提醒怎么到达你手里拿着的那台设备。
-- 第一个任务：在 `nanomuse/triggers/store.py` 的三种之外加第四种触发器（账号下的一台设备上线，来自 hub 的 `devices` 帧），接口相同，连同它产出的那条动态。
+- 第一个任务已完成：在 `nanomuse/triggers/store.py` 的三种之外加了第四种触发器 `device`（账号下的一台设备上线，来自 hub 的 `devices` 帧，接口相同）：`arrivals()` 只在真正的下线到上线时算一次上线，`MuseService.device_came_online` 触发每条匹配的触发器并产出「设备上线：…」那条动态，这一种受 hub 开关约束（`tests/test_triggers.py`、`tests/test_server.py`）。下一个任务：智能体在两次计划之间自己注意到别的事情，然后判断注意到的事值不值得说一句。
 
 ### 对话 {#the-conversation}
 
@@ -36,7 +36,7 @@ Meta 的 Muse 定下了这类智能体的样子；下面是我们还落后于它
 
 ### 让手更常成功 {#hands-that-succeed-more-often}
 
-把屏幕当手，在 Android 和桌面上都能用（桌面的操作器移植自 UI-TARS-desktop）。它失败在定位上（模型指错元素），以及碰到意外弹窗之后的恢复；而且我们还没有一组固定的任务来衡量它。
+把屏幕当手，在 Android 和桌面上都能用（桌面的操作器移植自 UI-TARS-desktop）。它失败在定位上（模型指错元素），以及碰到意外弹窗之后的恢复。[GUI 回归任务集](gui-regression.md) 已提供固定模拟场景，用于运行时回归和按需比较模型；真实设备的定位与恢复仍需收集失败轨迹。
 
 - 模块：`nanomuse/computer/`（`operator.py`、`coords.py`、`screen.py`）、`nanomuse/phone/`（`operator.py`、`trace.py`）、`harness/desktop/src/operator.ts`、Android 的 `io.github.nanomuse.hands`。
 - 阅读：[gui.md](gui.md)，操作器的约定；[troubleshooting.md](troubleshooting.md)。
@@ -103,3 +103,7 @@ Meta 的 Muse 定下了这类智能体的样子；下面是我们还落后于它
 | 1.0.3 | Helm | 聊天在每台设备上长得一样：和输入框一样宽的悬浮毛玻璃底栏、主题底色上的黑白药丸、当顶栏的一层遮罩，从 @Ichiro786 的 Android 改版带到 iPhone、网页控制台和桌面端；Android、iPhone 和桌面端可以用自己的一段视频当脸；桌面端和网页控制台能同时配置多个 OpenAI 兼容端点；一个下午报来的十个 Android 问题都修了，其中包括又能发送的自有 Anthropic key；iPhone 的操作按钮能发起语音提示；OpenCode Go 在每个客户端上可用；中继的镜像以非特权用户运行 |
 | 1.0.4 | Compass | 1.0.3 之后一周的整体体检：中继在朋友第一次使用时才发邀请奖励、能看出谁邀请了谁、记下操作者的每一步；运行时把 MCP 服务器的密钥放进保险库，建例行、触发器或目标前先问一句；网页控制台读屏可用、菜单能用键盘；桌面端在能播的电脑上接受 HEVC 视频，在 Cursor、Codex 和 Claude Code 旁边列出 DeepSeek Harness；Android 手机加密保存代理密码、跟随选中的模型组；iPad 的聊天是一根列、底栏重新是玻璃，别的设备上的 Muse 问起某一步时在手机上回答；You.com 不用 key 也能搜索 |
 | 1.0.5 | Lookout | Compass 次日的第二次体检：运维控制台能搜人、搜账单、搜事件；停用的账号从登录入口探不出来；运行时列出 DeepSeek Harness，一个地址只对应一个端点；桌面端八个失灵的按钮又能用了，退出前先护住进行中的工作，hub 断线一分钟内就能发现，Windows 版带上了更新所需的文件；Android 的审批卡片装得下屏幕，ChatGPT 登录在代理下有了出路；iPhone 的对话从顶栏底下滑过、Siri 短语有九种语言、能显示在别处设的 emoji 脸；手机和桌面端都安静地写每日动态；文档用 nanoMuse 自己的话描述它 |
+| 1.0.6 | Beacon | Lookout 之后九天的第三次体检：nanoMuse Cloud 只提供一个多模态模型 Qwen3.6-27B，聊天和操作屏幕都用它，不再替人出生图和生视频的钱，图片和短片在每个客户端都来自你自己的服务商；中继对错密码和不存在的账号给同样的回答，限额在一个事务里判定，一把 Hub 凭据只认一台设备；运行时把重启打断的计划任务补跑完，浏览器拒绝内网地址，忘掉一条记忆看得见也能撤销；桌面端重启前先问一句，导出数据不再被一个链接卡住，没登录也能穿上自己画的脸，设置里能搜索；手机能读到你点赞的动态，记住的审批只覆盖那一步，短片列表里有 Wan 2.7；iPhone 隐藏的步骤保持隐藏，能看到远端任务的进度；README 的贡献者名单是最新的 |
+| 1.0.7 | Logbook | Beacon 之后两天的第四次通读，围绕记录：nanoMuse Cloud 完整保存它回答的每一轮聊天，截图存成文件，App 把用自己 key 跑的轮次补上去，每台设备共用一份历史；脸的短片跟着脸走；每台设备说明由哪个服务商和模型回答；模型只回答 nanoMuse 的 App；运营者控制台重做，能实时看到模型端点，并在请求路径之外读数据；运行时每次调用都报上名字，边想边显示推理，能用 Parallel 搜索；桌面端核对是谁在停止或批准远端任务；手机的定时任务一天能跑几次，备份能不带文件、也能从 shell 发起；iPhone 把两个账号分开；隐私政策写明 hub 对每台设备保存什么 |
+| 1.0.8 | Crew | Logbook 之后四天的第五次通读，围绕几台设备互通消息：电脑上的定时任务会到手机上问你，每台设备都能看到另一台走到哪一步、什么时候在等你，第一个字出来之前会说排在第几位，记录里写着每次调用是谁发起的、你对回答的评价；中继让慢的一轮保持连接，按问题计数并逐问查看记录；运行时在 Windows 上把私密文件只留给主人，按 Windows 写的方式读写文件，压缩网页又能抓了；桌面端资源库能放你自己的文档；手机停止说话不再闪退，发出的提示词更小；iPhone 不再打断你的音乐，繁體中文覆盖全部；Opper、AtmoRouter、API Route 和 Keenable 进了目录 |
+| 1.0.9 | Tiller | 和 Crew 同一天的修复版：登录过的桌面端又能启动了（[#703](https://github.com/nano-muse/nanoMuse/pull/703)，对应 [#701](https://github.com/nano-muse/nanoMuse/issues/701)），中继的控制台在大记录上也能打开（[#708](https://github.com/nano-muse/nanoMuse/pull/708)），运行时可以给一个任务定预算、在整个记忆库里找回忆（[#697](https://github.com/nano-muse/nanoMuse/pull/697)、[#696](https://github.com/nano-muse/nanoMuse/pull/696)）。 |

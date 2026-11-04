@@ -16,6 +16,9 @@ from nanomuse_cloud.config import Settings
 from nanomuse_cloud.identifiers import parse
 from nanomuse_cloud.senders import AliyunSmsSender, BothSender, SendError, SmtpSender, make_sender
 
+# the tests call the models as one of the apps would; `apps_only` (0.28) refuses other software
+APP_UA = {"User-Agent": "nanoMuse/0.0 (tests)"}
+
 
 def aliyun_settings(**overrides) -> Settings:
     kw = dict(
@@ -63,10 +66,13 @@ def test_dysms_keeps_the_old_send_sms_request(monkeypatch):
     assert sender.endpoint == "https://dysmsapi.aliyuncs.com/"
     fake = FakeGet({"Code": "OK"})
     monkeypatch.setattr(senders.httpx, "get", fake)
-    sender.send(parse("+85212345678"), "111222")  # non-mainland is fine here, country code and no plus
+    sender.send(parse("13800138000"), "111222")
     q = dict(urllib.parse.parse_qsl(fake.urls[0].split("?", 1)[1]))
-    assert q["Action"] == "SendSms" and q["PhoneNumbers"] == "85212345678"
+    assert q["Action"] == "SendSms" and q["PhoneNumbers"] == "13800138000"
     assert json.loads(q["TemplateParam"]) == {"code": "111222"}
+    with pytest.raises(SendError):  # 短信服务 would take it; the relay keeps to the mainland
+        sender.send(parse("+85212345678"), "111222")
+    assert len(fake.urls) == 1
 
 
 def test_the_signature_is_the_rpc_hmac_sha1_over_the_sorted_query():
@@ -84,10 +90,23 @@ def test_the_signature_is_the_rpc_hmac_sha1_over_the_sorted_query():
 
 def test_rejections_and_wrong_channels_are_send_errors_without_the_number(monkeypatch, caplog):
     sender = AliyunSmsSender(aliyun_settings())
-    monkeypatch.setattr(senders.httpx, "get", FakeGet({"Code": "BUSINESS_LIMIT_CONTROL", "Message": "too many"}))
-    with pytest.raises(SendError):
+    monkeypatch.setattr(senders.httpx, "get", FakeGet({"Code": "isv.BUSINESS_LIMIT_CONTROL", "Message": "too many"}))
+    with pytest.raises(SendError) as held:
         sender.send(parse("13800138000"), "000000")
+    # the carrier's limit for one number is the person's to wait out, and a warning, not an error
+    assert held.value.reason == "too_often"
     assert "BUSINESS_LIMIT_CONTROL" in caplog.text and "13800138000" not in caplog.text
+    assert caplog.records[-1].levelname == "WARNING"
+    for code in ("biz.FREQUENCY", "isv.DAY_LIMIT_CONTROL", "isv.MONTH_LIMIT_CONTROL"):
+        monkeypatch.setattr(senders.httpx, "get", FakeGet({"Code": code, "Message": "limit"}))
+        with pytest.raises(SendError) as held:
+            sender.send(parse("13800138000"), "000000")
+        assert held.value.reason == "too_often"
+    # anything else is the operator's to read: a fault, logged as an error
+    monkeypatch.setattr(senders.httpx, "get", FakeGet({"Code": "isv.MOBILE_NUMBER_ILLEGAL", "Message": "bad"}))
+    with pytest.raises(SendError) as fault:
+        sender.send(parse("13800138000"), "000000")
+    assert fault.value.reason == "" and caplog.records[-1].levelname == "ERROR"
     with pytest.raises(SendError):  # dypns is mainland only
         sender.send(parse("+85212345678"), "000000")
     with pytest.raises(SendError):  # and never mail
@@ -113,6 +132,37 @@ def test_make_sender_both_routes_phones_to_sms_and_addresses_to_mail(monkeypatch
     monkeypatch.setattr(both.mail, "send", lambda ident, code: mailed.append((ident.value, code)))
     both.send(parse("dev-a@example.com"), "654321")
     assert mailed == [("dev-a@example.com", "654321")] and len(fake.urls) == 1
+
+
+def test_codes_in_the_log_are_an_error_on_a_public_relay_only(caplog):
+    """CODE_SENDER=log with open sign-up is a mistake on a relay the internet reaches, and the
+    expected setup on a machine of one's own: localhost, a LAN address (self-host.sh --local
+    --bind 0.0.0.0 writes that), a Tailscale address. Only the first is an error at start."""
+    public = (
+        "https://cloud.example.com",
+        "http://11.22.33.44:8787",
+        "http://[2400:1::1]:8787",
+    )
+    private = (
+        "http://127.0.0.1:8787",
+        "http://localhost:8787",
+        "http://192.168.1.20:8787",
+        "http://10.0.0.5:8787",
+        "http://172.16.3.4:8787",
+        "http://100.101.102.103:8787",
+        "http://[fd7a:115c:a1e0::1]:8787",
+    )
+    for base in public:
+        caplog.clear()
+        make_sender(aliyun_settings(sender="log", public_base=base, signup_open=True))
+        assert [r.levelname for r in caplog.records] == ["ERROR"], base
+    for base in private:
+        caplog.clear()
+        make_sender(aliyun_settings(sender="log", public_base=base, signup_open=True))
+        assert caplog.records == [], base
+    caplog.clear()
+    make_sender(aliyun_settings(sender="log", public_base=public[0], signup_open=False))
+    assert caplog.records == []
 
 
 def test_the_code_mail_states_the_lifetime_in_whole_minutes_like_the_sms(monkeypatch):
@@ -146,7 +196,9 @@ def test_senders_say_up_front_whom_they_can_reach():
     assert not dypns.accepts(parse("+85212345678"))  # 号码认证: mainland only
     assert not dypns.accepts(parse("dev-a@example.com"))
     dysms = AliyunSmsSender(aliyun_settings(aliyun_sms_api="dysms"))
-    assert dysms.accepts(parse("+85212345678")) and not dysms.accepts(parse("dev-a@example.com"))
+    assert dysms.accepts(parse("13800138000"))
+    assert not dysms.accepts(parse("+85212345678"))  # 短信服务 could, but the relay keeps to the mainland
+    assert not dysms.accepts(parse("dev-a@example.com"))
     mail = SmtpSender(aliyun_settings(sender="smtp", smtp_host="smtp.test", smtp_from="nanoMuse <no-reply@test>"))
     assert mail.accepts(parse("dev-a@example.com")) and not mail.accepts(parse("13800138000"))
     both = BothSender(mail, dypns)
@@ -170,7 +222,7 @@ def test_a_number_the_sender_cannot_reach_is_a_400_before_any_code_exists(monkey
     app = create_app(s, cloud)
 
     async def run():
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://cloud.test") as c:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://cloud.test", headers=APP_UA) as c:
             r = await c.post("/v1/auth/code", json={"identifier": "+1 415 555 0100"})
             assert r.status_code == 400 and r.json()["error"]["code"] == "phone_region"
             assert "e-mail" in r.json()["error"]["message"]

@@ -31,6 +31,7 @@ const WEB_APP_ONLY = [
   'data-tool',
   'data-turn-process-inline',
   'data-turn-process-member',
+  'data-variant',
   'task-manager-page',
   '_bubble',
   '_centerCol',
@@ -45,7 +46,6 @@ const WEB_APP_ONLY = [
   '_timeStart',
   '_toBottom',
   '_toBottomSlot',
-  '_userRow',
 ]
 
 test('every hook styles.ts leans on is in the installed dsh packages, set by the bundle itself, or a known web-app hook', { skip: !existsSync(scoped) && 'no @deepseek-ai packages installed' }, () => {

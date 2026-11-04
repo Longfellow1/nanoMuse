@@ -1,5 +1,7 @@
 # The Android app
 
+Bundled skills in Settings → Skills can be read, exported and switched off. Their name, content and files are managed by the app, so Edit, Update and Delete are unavailable. To customize one, export it and import a copy with a different name. The bundled `skill-creator` guide uses provider-neutral instructions.
+
 `android/` is nanoMuse for the phone: [OpenMinis](https://github.com/OpenMinis/OpenMinis)
 1.13 (GPL-3.0): a native app whose agent runs **on the phone**, with a Linux shell, a
 browser, MCP servers, skills and scheduled tasks inside the APK, with nanoMuse's own
@@ -43,12 +45,12 @@ update*) and offers the download.
    own, or a key of your own (any OpenAI-compatible endpoint, or the OAuth sign-ins the
    app ships with). Four models are set, not one, and they live on one page, **Settings →
    Models** (the card at the top of Settings opens it): **Chat**, the model that talks with
-   you (the account's menu opens on `deepseek-v4.1-flash`); **Operating the screen**, the one
-   that looks at the screen (`qwen3.8-27b`, the account's or the same model under your own
-   key); **Making pictures** and **Making clips**. Each row shows `<provider> · <model>` and
-   opens a picker: the *nanoMuse Cloud* group first when signed in, the recommended model
-   first and marked, then one group per provider of your own with only the models that fit
-   the row. A group shows eight models until you tap *Show N more* (the catalogue's default
+   you; **Operating the screen**, the one that looks at the screen; **Making pictures** and
+   **Making clips**. The hosted account recommends the same multimodal
+   `Qwen/Qwen3.6-27B-FP8` for the first two jobs and does not generate pictures or clips.
+   Each row shows `<provider> · <model>` and opens a picker: the *nanoMuse Cloud* group first
+   when signed in only on rows its live menu covers, then one group per provider of your own
+   with only the models that fit the row. A group shows eight models until you tap *Show N more* (the catalogue's default
    for the row first, then the one in use, then the rest as the provider lists them); past
    eight models in all, a *Search models* field above the groups filters every group live by
    id or name, and *No model matches* says when nothing does; the search and the opened
@@ -56,10 +58,11 @@ update*) and offers the download.
    chat's own `•••` menu, is the default for new chats and moves the main chat
    (*Applies to the main chat and to new chats; a side chat keeps its model.*); a side
    chat already open keeps its model. The other three pickers
-   open with *Automatic* (*Currently nanoMuse Cloud · qwen3.8-27b*), which forgets a choice
+   open with *Automatic* (*Currently nanoMuse Cloud · Qwen/Qwen3.6-27B-FP8* for screen
+   operation, for example), which forgets a choice
    made there and lets the row follow the order below again. Signed in, the page opens with
    one switch, *Use nanoMuse Cloud models*: off, the account leaves every picker and the
-   automatic order, no side call (titles, memory, pictures, clips) runs on it, and only the
+   automatic order, no side call (titles, memory or screen operation) runs on it, and only the
    *Use nanoMuse Cloud this time* button on a refused turn does; the sign-in stays for sync and
    your devices. If the chat model is still the account's at that moment, the Chat row moves
    to your first own chat model (the catalogue's default for that provider), as every client
@@ -85,15 +88,17 @@ gives the vendor (chat, operating the screen, making pictures, making clips), al
 it* switches the ticked rows to this provider, each on the catalogue's default for that job
 (`defaults.chat` and friends in `providers.json`), or on the first model of its list that
 fits when the default is not there; *Not now* changes nothing, and so does an unticked switch.
-Signed in, the body says nanoMuse Cloud keeps the rest. The page is the place to change it later.
+The other model choices stay as they are. The page is the place to change it later.
 
 **When you have not chosen.** Chat is the relay's recommended model when signed in, else the
 first provider of your own. The screen, pictures and clips follow the chat provider when it is
 a provider of your own with that capability (its catalogue default); else the relay's model
-when signed in; else the first provider of your own that can. A choice always wins, and
-nanoMuse Cloud never steps in front of a provider you chose. When a model of your own fails,
+when signed in and its live menu offers that job; else the first provider of your own that
+can. The hosted Cloud menu offers chat and screen operation, not media generation. A choice
+always wins, and nanoMuse Cloud never steps in front of a provider you chose. When a model of your own fails,
 nothing falls back on its own: the error card gets *Use nanoMuse Cloud this time* (signed in
-only), which runs that one turn on the relay's chat model and changes no row.
+only) for a chat or screen turn, which runs that one turn on the relay's chat model and
+changes no row. Failed media has no Cloud retry; choose or fix a provider of your own.
 
 **Your own relay.** The sign-in screen talks to nanoMuse Cloud unless you tell it
 otherwise: *Use a different server* under the sign-in form takes the address of a relay
@@ -110,9 +115,82 @@ usage, the model menu) goes to that address.
 
 Shell progress updates preserve text beyond a shorter rewrite. Terminal color and title codes are removed before those updates, so they cannot leave escape fragments in the output.
 
+The agent's system prompt keeps its safety, tool and phone-operation instructions in a stable
+prefix. Session-dependent material (skills and MCP metadata, model/device state,
+conversation-specific steering, memory and `USER.md`) is appended in a deterministic suffix, with
+the date, language and available-model count in its final runtime-context section. Updating memory
+or crossing into a new day therefore leaves the static prefix available to providers that support
+prefix caching.
+
+The phone budgets each request against the active model's context window, including a smaller
+window configured for its model group. `ContextBudget` reserves the smaller of the requested
+output limit and `max(4096, 15% of the window)`, bounded by the window itself. It then subtracts
+system instructions and tool definitions to find the space available for conversation history.
+Old tool content is eligible for offloading at 75% of that space; summarization starts at 90%,
+and maintenance aims for 50%. The fixed prompt is added back to each threshold. These are
+maintenance watermarks: the actual output limit is calculated separately from the space left
+by the outgoing request. There is no universal 32k compaction limit.
+
+Context checks include ordinary message text, structured content, summaries, reasoning sent
+back to the provider, system instructions, tool definitions and images. Non-ASCII text has its
+own estimate. Successful responses calibrate that estimate up or down gradually; calibration
+is saved separately for each provider configuration and model and survives **Continue** or an
+app restart. For an unchanged request prefix, the latest reported input usage takes precedence,
+with an estimate added for new messages. Changing the provider, instructions, tool definitions
+or old content invalidates that usage anchor. Invalid usage samples are ignored. Estimates for
+new or rewritten input are still heuristics, not the model's own tokenizer. Native audio uses provider-reported accounting rather than treating its base64
+transport as text. Requests are measured again after offloading or summarization.
+
+Before requesting a summary, the phone can remove older reasoning from the outgoing request
+and move older tool results and large tool arguments to files the model can read. It protects
+the latest user request and, normally, the latest three tool iterations; under tighter pressure,
+it keeps at least the latest iteration. A single oversized result in that latest completed
+iteration can be saved to a file while its call, reasoning and result reference remain paired. A failed file write
+leaves the original content in place. If summarization cannot make enough room, eligible older
+tool steps can also be archived with a file reference. Saved conversation history retains its
+original messages. Removing reasoning and replacing older history with a summary are lossy:
+the model no longer receives every original detail on each call.
+
+An early summary that fails or does not shrink the request does not stop a turn below its
+capacity reserve, and does not run again after every tool result. Each agent run has at most
+three automatic summary attempts. If only the calibration multiplier puts a request over the
+reserve while its uncalibrated estimate still fits, the run permits one provider request to
+check that estimate. Otherwise a request that cannot be reduced enough stops. A summary
+stream times out after 120 seconds without a chunk; its complete operation, including segments
+and retries, has a 900-second deadline. Stopping the turn cancels the summary request.
+
+A summary separates background and completed work from the current request, its unfinished
+steps and the next action. When no task is active, those task sections say so instead of
+reviving old requests. After summarization, optional older turns are replayed only within the
+budget left by the fixed prompt, summary and protected current turn. That budget changes with
+the active model and request rather than staying at 8k. For a very long single task, the
+checkpoint replaces covered older steps while the full user request and recent complete tool
+iterations remain. The latest question and retained tool pairs stay intact even when that
+protected tail alone is too large; the context guard then
+decides whether it can be sent. Structured follow-ups and attachments also carry the summary.
+Notices follow the app language. This Android loop is independent of the Python runtime's
+task budgets.
+
+`PromptDiet` shortens the `browser_use` schema descriptions while keeping every action and
+parameter, and condenses the `minis-*` paragraphs in the Android tools section. Each CLI's
+`--help` provides its full usage instructions.
+
+With the default thinking rules, Qwen3.8-Max summary requests explicitly send `enable_thinking: false`. Omitting that
+field leaves the provider's default in control even though the app requested thinking off.
+The switch is documented in [Alibaba Cloud's thinking guide](https://help.aliyun.com/zh/model-studio/deep-thinking).
+A timeout still does not identify whether the delay was in the network or at the provider.
+
+While a turn has no first token yet, a small line sits under the typing dots (`NmWaitLine`):
+nothing for ten seconds, then *The model is busy, 15 s so far* with *Cancel*; and when
+nanoMuse Cloud has said the request is waiting for one of its provider slots (relay 0.31
+sends a chunk with no `choices` and a `nanomuse: {phase, ahead}` field every five seconds,
+[cloud.md](cloud.md#protocol)), *3 ahead of you* or *You are next* instead, as soon as that
+is known (`NmStreamStatus`, one marked line in `OpenAIProvider`). Each step of a tool-using
+turn counts its own wait.
+
 | | |
 | --- | --- |
-| **The agent, on the phone** | A sandboxed Alpine Linux, a real shell, files, a browser, MCP servers, skills in the Agent Skills format, memory, scheduled tasks; approvals before deleting, sending or paying. The model is the account's or your own; nothing you say passes through the project's relay when you use your own key. |
+| **The agent, on the phone** | A sandboxed Alpine Linux, a real shell, files, a browser, MCP servers, skills in the Agent Skills format, memory, scheduled tasks; approvals before deleting, sending or paying. The model is the account's or your own; with your own key the chat itself goes from the phone to that provider and never through the project's relay, and from 1.0.7 the finished turn is added to your account's record afterwards (the model's id and the turn, never the key) so your other devices have it ([cloud.md](cloud.md#the-record)). |
 | **Hands** (`hands/`) | With *Hands* on and the accessibility service enabled, the agent looks at the phone's screen and taps, types and swipes in its apps: the last rung after APIs, fetches and the browser. A stage over the app shows where it is about to tap and a capsule with the step and **Stop**; a glow breathes along the screen's edges (blue working, amber waiting; 2.4 s in, 2.4 s out, like every working light on every client since round 9: nothing runs round the rim or slides down the screen, and the capsule's ring and bars breathe at the same pace; everything holds still under the system's reduce-motion setting); when a tap would send, post or delete, the capsule itself asks (**Allow** / **Deny**, the same request the chat card and the notification show), so you are not pulled back into nanoMuse (money is confirmed with the screen lock in the chat card; the capsule offers *Open* for that one); the capsule only ever answers its own request, never a shell or browser card of another conversation, and **Stop** while a card is waiting denies it and ends the run at once. Passwords and codes are always yours to type. The same action a third time on a screen that did not change gets a line in the history so the model changes tack, and a sixth ends the run as *infeasible* with the action named (`HandsLoopWatch`, the floor the runtime has too), instead of one model call per step until the thirty-minute limit. Every step's screenshot is written next to the run's trace under the session's `attachments/hands/<run>/`; the ten newest runs keep all of theirs, an older run keeps its trace and the last screen (the one the chat shows), and past 200 runs the oldest is removed (`HandsTraces`). [gui.md](gui.md) is the design record; the app's own hands are in `io.github.nanomuse.hands`. |
 | **Reach** (`reach/`) | Your computers, from the phone: "say it on the phone, it gets done there" (a shell command, a file, the computer's screen, or a whole task for the nanoMuse running there). The way in is the hub (next row): install nanoMuse Desktop on the computer and sign in with the same account, and it is under *Account → Devices* within seconds, on any network, the only way since 0.1.24 (the local-network host script is gone). *Settings → Computers* lists the account's computers and says which account the phone uses, since a missing computer has nearly always signed in with another one. Approvals are decided on the phone before anything is sent. [every-device.md](every-device.md). |
 | **The hub** (`hub/`) | Every signed-in device of the account meets on the relay's hub: the phone sees your computers, asks them to do things, gets their approvals as cards, and can be asked by them. A foreground service keeps it reachable in the background (Android 13+ asks for the notification permission for that). [hub.md](hub.md). |
@@ -204,6 +282,16 @@ models' word, as before. When no configured provider has a capability, the page 
 sentence (*Pictures need a provider with image models: Bailian, OpenAI, Gemini or
 OpenRouter.*) instead of failing.
 
+**Which video models a key has.** Bailian's `/models` list names no video models, so the app
+asks the host about each of the models this build knows (`VideoGen.KNOWN_DASHSCOPE_MODELS`,
+Wan 2.2 Flash first) with an empty task that bills nothing, and remembers the answer for a day.
+The *Video* picker offers that answer plus every model you listed on the provider yourself — an
+entry whose name says video (`t2v`, `i2v`, …) or whose output modalities say `video` in its
+details, whatever its name — as it is, probe or no probe. The remembered answer is asked again
+as soon as the models to ask about change (an entry you added, a build that knows a newer
+model), not only after the day is up. *Image & video models* keeps a field for typing any model
+id. ([#508](https://github.com/nano-muse/nanoMuse/issues/508))
+
 In the avatar studio, asking for a new set of candidates replaces the previous set. A picture
 or failure that finishes from the previous request cannot change the new set's tiles or files.
 Again starts the new request without waiting for the old picture to finish saving.
@@ -281,12 +369,24 @@ pack is unavailable still falls back once to the default service.
 The voice detector releases its allocated recorder if recording cannot start or is cancelled
 before capture begins. You can retry voice input without leaving that recorder allocated.
 
+A segment that closes on silence is transcribed and the microphone stops, and that stop used
+to free the voice detector's native object from inside its own callback, on the same thread,
+while the detector was still running: the app died with a native crash the moment a take of
+two seconds or more fell silent (1.0.8 fixes this; upstream OpenMinis 1.14 has the same
+change). A stop from inside a callback now takes effect once the detector has handed the
+frame back.
+
 ## Privacy and permissions
 
 The relay keeps an account id, a masked identifier, usage counts and the agent's name and
-look (so your devices match), and message content only as conversation sync, on by default
-when signed in and switched off under *Data controls* ([privacy.md](privacy.md),
-[sync.md](sync.md)); the first conversation says so in its fourth line. On the phone, API keys and the account key
+look (so your devices match); of your chats, the record (every turn with the relay's models
+in full, and from 1.0.7 the turns on your own key too, readable by your devices and by
+whoever runs the relay, deleted from *Data controls* with one tap), conversation sync (on by
+default when signed in, switched off under *Data controls*), and the training set only
+while *Help improve* is on ([privacy.md](privacy.md), [cloud.md](cloud.md#the-record),
+[sync.md](sync.md)); the first conversation says so in its fourth line. *Data controls* shows
+what the record holds of your account (turns, those on your own keys, pictures) and how long
+this relay keeps a turn. On the phone, API keys and the account key
 are in `EncryptedSharedPreferences`, and so is the proxy password of *Settings → Network*
 (since 1.0.4; on this phone only); since 0.1.40 the app takes no part in
 the device backup at all (`allowBackup="false"`: chats, memory and keys never go to Google,
@@ -314,9 +414,27 @@ to other apps. Voice input through a provider's speech model keeps the microphon
 while a recording is on: stopping or cancelling the recording closes the recorder at once, and a
 cancelled recording's audio is dropped, never sent to the provider.
 
+**What the record is told beyond the turn itself** (relay 0.31). A chat request to nanoMuse
+Cloud carries, next to the device and the conversation, where the call sits: who started the
+turn (`X-NanoMuse-Run`: you, a scheduled task, the feed's routine, a goal's check, a task
+another device asked for through the hub), the turn's number in the conversation as the chat
+counts it, the call's number within the turn, the screen task's run and step while the hands
+work, and `X-NanoMuse-Platform: android`; a turn run on a key of your own goes up with the
+same fields ([cloud.md](cloud.md#provenance); `io.github.nanomuse.cloud.Provenance`, read
+from the chat's coroutine so a typed message, a retry, a routine's prompt, a hub task and a
+hands step all say the same). While signed in, the phone also sends short records of what
+happened around a turn (`POST /v1/events`, `io.github.nanomuse.cloud.ClientEvents`): what
+the risk gate decided on each shell command, browser tap or screen step and how its card was
+answered, each step of the hands and how the run closed, a turn stopped by hand or ended in
+an error, and the two thumbs under the newest reply and the one question after a Stop
+(*Why did you stop it?*, five one-word answers and *Skip*; a routine's or another device's turn
+is not asked about). Codes and numbers only — the tool's kind, the risk's tier, who answered,
+how long — never the command, the page, the screen or any words of the conversation
+([cloud.md](cloud.md#client-events)); *Data controls*' delete removes them with the turns.
+
 ## Building it yourself
 
-JDK 17 or 21 (CI uses 21) and the Android SDK (Android Studio installs both); `scripts/android/env.sh` sets
+JDK 21 (what CI uses) and the Android SDK (Android Studio installs both); `scripts/android/env.sh` sets
 the environment on a bare machine. The project is under `android/src/android`:
 
 ```bash
@@ -352,6 +470,82 @@ and put its four values in `android/keystore.properties` (git-ignored: `storeFil
 
 The chat-only emulator build (`-Pnm.abi=x86_64`) excludes cached arm64 proot and Alpine root filesystem assets. Switching back to the default arm64 build includes those assets again; no cache deletion is needed.
 
+### Windows with WSL {#windows-wsl}
+
+On x64 Windows, use an x86_64 Ubuntu environment in WSL 2 for the complete build.
+The native build scripts support Linux and macOS hosts, not Windows shells.
+[Install WSL](https://learn.microsoft.com/en-us/windows/wsl/install) first if needed,
+then open Ubuntu. Only this first command runs in an administrator PowerShell:
+
+```powershell
+wsl --install -d Ubuntu
+```
+
+Run the remaining commands in Ubuntu. Keep the checkout, SDK and caches in its Linux
+filesystem, rather than under `/mnt/c`, and keep shell scripts as LF text:
+
+```bash
+sudo apt update
+sudo apt install -y git curl unzip zip build-essential pkg-config openjdk-21-jdk-headless
+mkdir -p ~/src
+git clone --config core.autocrlf=false https://github.com/nano-muse/nanoMuse.git ~/src/nanoMuse
+cd ~/src/nanoMuse
+git submodule update --init android/deps/proot
+```
+
+Install [Go for Linux](https://go.dev/doc/install) and put its `go` command on
+Ubuntu's `PATH`; the [Android workflow](https://github.com/nano-muse/nanoMuse/blob/main/.github/workflows/android.yml)
+uses Go 1.26. Download the **Linux** Android SDK Command-Line Tools and follow the
+[sdkmanager setup](https://developer.android.com/tools/sdkmanager), using
+`$HOME/Android/Sdk` as the SDK directory. The executable must end up at
+`$HOME/Android/Sdk/cmdline-tools/latest/bin/sdkmanager`. The SDK installed by
+Windows Android Studio does not contain the Linux NDK executables this build needs.
+
+```bash
+export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+export ANDROID_HOME="$HOME/Android/Sdk"
+export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
+export PATH="$JAVA_HOME/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+export GOROOT="$(go env GOROOT)"
+export GOPATH="$(go env GOPATH)"
+export PATH="$GOPATH/bin:$PATH"
+export GOTOOLCHAIN=auto
+
+java -version
+go version                         # must report linux/amd64
+sdkmanager --sdk_root="$ANDROID_HOME" --licenses
+sdkmanager --sdk_root="$ANDROID_HOME" "platform-tools" "platforms;android-36" \
+  "build-tools;35.0.0" "cmake;3.22.1" "ndk;27.2.12479018"
+
+bash scripts/android/build-natives.sh
+cd android/src/android
+./gradlew :app:assembleDebug --console=plain --no-daemon
+```
+
+The APK is `app/build/outputs/apk/debug/app-debug.apk` relative to the Gradle
+directory. Copy the completed APK to Windows if needed; keep the build tree in Linux.
+
+Gradle creates the debug signing key at `$HOME/.android/debug.keystore` inside
+Ubuntu. Preserve that key outside the checkout if later debug builds need to update
+this APK. It may differ from the key in your Windows home. A debug APK cannot update
+an official APK signed with another key; use the release-signing instructions above
+for your own release key.
+
+If Kotlin runs out of Java heap, check the memory available to WSL with `free -h`.
+On a machine with enough memory for both Windows and WSL, a build can raise the Gradle
+and Kotlin daemon limits without editing the repository. For example, from the same
+Gradle directory:
+
+```bash
+./gradlew :app:assembleDebug --console=plain --no-daemon \
+  '-Dorg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8' \
+  '-Pkotlin.daemon.jvmargs=-Xmx6g'
+```
+
+These are optional heap ceilings, not minimum requirements. Choose limits that fit
+the memory available to WSL and leave room for the other processes.
+
+
 ## Releases
 
 `.github/workflows/android.yml` builds the debug APK on every change under `android/`
@@ -379,9 +573,12 @@ like the Python package's version does.
 | `ui/models/` | The Models page, the picker behind each row, the *Use it for* card (`minis://settings/models`) |
 | `chat/CloudRetry.kt` | *Use nanoMuse Cloud this time*: whether the card offers it and the one-turn provider `ChatViewModel.retryLast` uses |
 | `chat/RoutineWakes.kt`, `ui/chat/NmRoutineWakeRow.kt` | A scheduled task's turn is the routine's, not the person's: `ScheduledAgentRunner` arms a wake before the prompt goes out, `ChatViewModel` binds it to the persisted row, and the chat draws that row as one quiet line, *Routine · 〈label〉 · 08:00*, instead of a bubble in the person's voice; the model gets a one-turn `SessionAddenda` saying so, so it opens with the result rather than thanking anyone for asking. Up to 1.0.4 the prompt stood in the chat as if the person had typed it |
-| `feed/` | The Feed: `FeedFlow` keeps the daily scheduled task and the conversation it writes in, which is the agent's working room and stays out of the drawer, the chat list and the main-chat fallback (`FeedFlow.hidden`, read by `ChatRepository.observeSessions()`, `MainChat` and the move-to sheet); `FeedStore` holds the posts. When the task has written posts while the app is in the background, one notification names them and opens the Feed tab (`minis://feed`), in place of the generic "task done" notice with the model's text that up to 1.0.4 opened the conversation |
-| `hands/` | The accessibility service as the hand, the stage and the capsule, the screen reader; `Hands.screenModel` picks the screen's model (chosen → the chat provider's own default when it sees → the Cloud's `qwen3.8-27b` → the same under your own key → a chat model that sees → the Vision Group) |
+| `feed/` | The Feed: `FeedFlow` keeps the daily scheduled task and the conversation it writes in, which is the agent's working room and stays out of the drawer, the chat list and the main-chat fallback (`FeedFlow.hidden`, read by `ChatRepository.observeSessions()`, `MainChat` and the move-to sheet); `FeedStore` holds the posts, newest day first and, inside a day, the newest batch first with each batch in the model's order (a batch shares its `created` time; `FeedStore.DAY_ORDER`, unit-tested). The agent reads the posts, with `liked: true` on the ones you tapped, at `/var/minis/feed/YYYY-MM-DD/NN.md`: a read-only copy (`FeedSandboxScope`, refreshed before each shell command and on every like) rather than the app's own directory, since PRoot cannot bind a folder read-only and a like is the person's, not the agent's to change; a post without `liked` is one not reacted to, which the prompt says is not a dislike. When the task has written posts while the app is in the background, one notification names them and opens the Feed tab (`minis://feed`), in place of the generic "task done" notice with the model's text that up to 1.0.4 opened the conversation |
+| `chat/TurnReply` | Which assistant message a finished turn produced: the last assistant row only when it follows the last user row and carries no error. The feed, the goals and the first conversation read the reply through it, so a turn that failed before its own reply existed hands them nothing rather than the previous reply (#637) |
+| `net/ModelBlip` | The retry around the sandbox's `model_use` call: a network error, a transient error or a 5xx is tried again after one and two seconds, as the chat and iOS's bridge do; anything else is thrown at once. Also names a gateway's `HTTP 0` (its upstream gave nothing) as transient (#640) |
+| `hands/` | The accessibility service as the hand, the stage and the capsule, the screen reader; `Hands.screenModel` picks the screen's model (chosen → the chat provider's own default when it sees → the model Cloud recommends for `gui` → the own-key fallback → a chat model that sees → the Vision Group) |
 | `ui/coding/` | The coding agents of your computers |
+| `backup/` | What nanoMuse adds to the upstream backup (*Settings → Backup and restore*, `minis://settings/backup`): under *Chats*, *Files in the chats* (on by default) can be turned off so the chats travel as messages only, each session's files listed in the package as tombstones and the other categories unchanged, which keeps a 1.5 GB package down to a few MB for a server that refuses large uploads ([#561](https://github.com/nano-muse/nanoMuse/issues/561)); a `413` from a destination names the server's upload limit (`BackupHints`); and `nanomuse-backup run` in the sandbox makes one backup with the page's saved choices and every enabled destination, recorded in the page's history (`BackupRun`; `status`, `history`, `choices` read it), so a scheduled task can keep the phone backed up. It refuses when encryption is on, since the passphrase is typed on the page and never reaches the shell, and when no destination is enabled ([#560](https://github.com/nano-muse/nanoMuse/issues/560)) |
 | `connectors/`, `ui/connectors/` | The connectors catalogue (`ConnectorsCatalogue` reads the asset), MCP authorization discovery + registration (`McpAuthDiscovery`), connecting and token refresh (`Connectors`), what this phone connected as published to the profile and what the other devices did (`SharedConnectors`), the Settings → Connectors page |
 | `ui/cloud/` | Sign-in, the Account screen, the Devices section |
 | `res/values*/nm_strings.xml` | Every nanoMuse string in the seventeen languages the app has (English, 简体中文, 繁體中文, German, Spanish, Filipino, French, Indonesian, Japanese, Korean, Malay, Polish, Brazilian Portuguese, Romanian, Russian, Thai, Turkish); every file carries the same keys, apart from the two the English file marks `translatable="false"` (the relay address example and the product name `nanoMuse Cloud`), and a missing one falls back to English |

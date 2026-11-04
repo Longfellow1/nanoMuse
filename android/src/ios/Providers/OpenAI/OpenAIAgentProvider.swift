@@ -165,8 +165,8 @@ final class OpenAIAgentProvider: AgentProvider {
             Self.injectThinkingParams(into: &body, model: model, level: thinkingLevel, isOpenRouter: provider.useOpenRouterCompat, maxTokens: maxTokens, offEffort: offEffort, unifiedReasoningEffort: provider.usesUnifiedReasoningEffort, isMistral: provider.isMistral, isXAI: provider.isXAI, isDashScope: provider.isDashScope, providerInstanceId: provider.providerInstanceId)
         }
 
-        // nanoMuse: OpenCode Go wants one stable id per conversation (NanoMuseOpenCodeSession)
-        let opencodeSession = NanoMuseOpenCodeSession.wants(provider.customBaseURL) ? Self.derivePromptCacheKey(from: messages) : nil
+        // nanoMuse: OpenCode Go wants one stable id per conversation (NanoMuseOpenCodeSession); so does the account's relay (NanoMuseCloudHeaders)
+        let opencodeSession = NanoMuseOpenCodeSession.wants(provider.customBaseURL) || NanoMuseCloudHeaders.isCloud(provider.extraHeaders) ? Self.derivePromptCacheKey(from: messages) : nil
         let (lineStream, _) = try await provider.streamRaw(body: body, isResponsesAPI: false, opencodeSession: opencodeSession)
 
         return AsyncThrowingStream { continuation in
@@ -250,6 +250,7 @@ final class OpenAIAgentProvider: AgentProvider {
                             logger.error("SSE stream error: \(message)")
                             throw LLMError.providerError(message: "[\(code ?? -1)] \(message)")
                         }
+                        if let status = event["nanomuse"] as? [String: Any] { NanoMuseStreamStatus.note(status) } // nanoMuse: the relay's "queued, N ahead" before the model speaks (docs/cloud.md)
 
                         // Usage
                         if let usage = event["usage"] as? [String: Any] {
@@ -543,8 +544,8 @@ final class OpenAIAgentProvider: AgentProvider {
             body["service_tier"] = "priority"
         }
 
-        // nanoMuse: OpenCode Go wants one stable id per conversation (NanoMuseOpenCodeSession)
-        let opencodeSession = NanoMuseOpenCodeSession.wants(provider.customBaseURL) ? Self.derivePromptCacheKey(from: messages) : nil
+        // nanoMuse: OpenCode Go wants one stable id per conversation (NanoMuseOpenCodeSession); so does the account's relay (NanoMuseCloudHeaders)
+        let opencodeSession = NanoMuseOpenCodeSession.wants(provider.customBaseURL) || NanoMuseCloudHeaders.isCloud(provider.extraHeaders) ? Self.derivePromptCacheKey(from: messages) : nil
         let (lineStream, _) = try await provider.streamRaw(body: body, isResponsesAPI: true, opencodeSession: opencodeSession)
 
         return AsyncThrowingStream { continuation in
@@ -1762,6 +1763,41 @@ final class OpenAIAgentProvider: AgentProvider {
                         ])
                     }
                 }
+            }
+        }
+        return Self.dedupeResponsesCallIds(result)
+    }
+
+    // nanoMuse: Responses rejects duplicate function_call call_id values across the
+    // whole input. Rename later calls deterministically and queue each rewritten id so
+    // parallel/repeated function_call_output items keep the same pairing. Deliberately
+    // inspect call_id only: reasoning item ids and function_call item ids are untouched.
+    internal static func dedupeResponsesCallIds(_ input: [[String: Any]]) -> [[String: Any]] {
+        var result = input
+        var callIdCounts: [String: Int] = [:]
+        var usedCallIds = Set<String>()
+        var pendingOutputs: [String: [String]] = [:]
+        for index in result.indices {
+            guard let type = result[index]["type"] as? String,
+                  let rawId = result[index]["call_id"] as? String else { continue }
+            if type == "function_call" {
+                var occurrence = (callIdCounts[rawId] ?? 0) + 1
+                var rewritten: String
+                while true {
+                    let suffix = occurrence == 1 ? "" : "-\(occurrence)"
+                    rewritten = String(rawId.prefix(maxResponsesAPIIdLength - suffix.count)) + suffix
+                    if !usedCallIds.contains(rewritten) { break }
+                    occurrence += 1
+                }
+                callIdCounts[rawId] = occurrence
+                usedCallIds.insert(rewritten)
+                pendingOutputs[rawId, default: []].append(rewritten)
+                result[index]["call_id"] = rewritten
+            } else if type == "function_call_output",
+                      var queued = pendingOutputs[rawId],
+                      !queued.isEmpty {
+                result[index]["call_id"] = queued.removeFirst()
+                pendingOutputs[rawId] = queued
             }
         }
         return result

@@ -14,6 +14,8 @@ import com.openminis.app.data.model.ProviderType
 import com.openminis.app.logging.AppLogger
 import com.openminis.app.provider.ProviderFactory
 import com.openminis.app.provider.openai.OpenAIProvider
+import io.github.nanomuse.cloud.NanoMuseCloud
+import io.github.nanomuse.media.RelayMediaPolicy
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -72,8 +74,14 @@ object ImageGen {
     fun eligibleInstances(context: Context): List<ProviderInstance> {
         val app = context.applicationContext as? MinisApp ?: return emptyList()
         val repo = app.providerRepositoryOrNull ?: return emptyList()
+        val cloudId = NanoMuseCloud.instance(context)?.id
+        val relayCanDraw = cloudId != null &&
+            NanoMuseCloud.baseUrl(context) != NanoMuseCloud.DEFAULT_BASE &&
+            repo.config.value.instances.firstOrNull { it.id == cloudId }
+                ?.let { availableModels(context, it).isNotEmpty() } == true
         return repo.config.value.instances.filter { inst ->
-            inst.isEnabled && inst.credentialType == ProviderCredential.apiKey && when (inst.providerType) {
+            (inst.id != cloudId || relayCanDraw) &&
+                inst.isEnabled && inst.credentialType == ProviderCredential.apiKey && when (inst.providerType) {
                 ProviderType.openAI, ProviderType.openAIResponses, ProviderType.openRouter, ProviderType.xAI -> true
                 ProviderType.anthropic, ProviderType.gemini, ProviderType.kimiCode, ProviderType.antigravity, ProviderType.unsupported -> false
                 else -> inst.customBaseURL != null
@@ -123,7 +131,14 @@ object ImageGen {
      * host leads; dated snapshots (`…-2026-03-03`) hide behind their undated alias.
      */
     fun availableModels(context: Context, instance: ProviderInstance): List<String> {
-        val ids = imageEntries(context, instance).map { it.model.id }.distinct()
+        var ids = imageEntries(context, instance).map { it.model.id }.distinct()
+        if (instance.id == NanoMuseCloud.instance(context)?.id) {
+            ids = RelayMediaPolicy.available(
+                NanoMuseCloud.baseUrl(context),
+                NanoMuseCloud.menuModelIds(context),
+                ids,
+            )
+        }
         val undated = ids.filterNot { DATED.containsMatchIn(it) }.toSet()
         val shown = ids.filter { id -> !DATED.containsMatchIn(id) || DATED.replace(id, "") !in undated }
         val rec = recommendedModel(context, instance)
@@ -181,7 +196,8 @@ object ImageGen {
      * The image model: the one chosen (Settings → Models, or → Image & video models); with
      * nothing chosen, in the Models page's order (0.1.41, [io.github.nanomuse.models.SlotOrder]):
      * the chat provider's own image model when the chat provider is the person's own and
-     * draws, else nanoMuse Cloud's when signed in, else the first own provider that draws.
+     * draws, else nanoMuse Cloud's when its menu actually has one, else the first own provider
+     * that draws.
      * [automatic] leaves the choice aside and answers what that order gives now (the picker's
      * *Automatic* row says so).
      */
@@ -189,9 +205,11 @@ object ImageGen {
         val app = context.applicationContext as? MinisApp ?: return null
         val repo = app.providerRepositoryOrNull ?: return null
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val eligible = eligibleInstances(context)
-        val savedId = if (automatic) null else prefs.getString(KEY_INSTANCE, null)
         val cloudId = io.github.nanomuse.cloud.NanoMuseCloud.instance(context)?.id
+        val eligible = eligibleInstances(context).filter { inst ->
+            inst.id != cloudId || availableModels(context, inst).isNotEmpty()
+        }
+        val savedId = if (automatic) null else prefs.getString(KEY_INSTANCE, null)
         val inst = eligible.firstOrNull { it.id == savedId }
             ?: io.github.nanomuse.models.SlotOrder.resolve(
                 chosen = null,
@@ -230,7 +248,8 @@ object ImageGen {
             provider = ep.instance.providerType.name,
             outputModalities = listOf("image"),
         )
-        return ProviderFactory.create(ep.instance, ep.apiKey, model, context) as? OpenAIProvider
+        // record = false: a picture is not a chat turn, and the concrete provider is needed
+        return ProviderFactory.create(ep.instance, ep.apiKey, model, context, record = false) as? OpenAIProvider
             ?: throw ImageGenException("${ep.label} is not an OpenAI-compatible provider")
     }
 

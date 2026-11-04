@@ -118,11 +118,59 @@ def test_load_skill_checks_the_folder(tmp_path: Path):
         load_skill(tmp_path / "missing")
 
 
+def test_files_survive_a_folder_under_a_dotted_path(tmp_path: Path):
+    """A skill folder whose own path carries a dot segment (a home under `~/.local`,
+    a checkout under `~/.config`, a pytest tmp dir) must still list its files: only the
+    name relative to the skill folder decides what is hidden."""
+    folder = tmp_path / ".cache" / "expense-report"
+    folder.mkdir(parents=True)
+    (folder / "SKILL.md").write_text(APPLE_STYLE)
+    (folder / "scripts").mkdir()
+    (folder / "scripts" / "total.py").write_text("print(1)")
+    (folder / "scripts" / ".hidden").write_text("")
+    (folder / "references").mkdir()
+    (folder / "references" / "rates.md").write_text("# rates\n")
+    (folder / "assets").mkdir()
+    (folder / "assets" / "logo.txt").write_text("logo\n")
+    s = load_skill(folder)
+    assert s.files == [
+        Path("scripts/total.py"),
+        Path("references/rates.md"),
+        Path("assets/logo.txt"),
+    ]
+
+
+def test_files_skip_a_dot_segment_inside_the_folder(tmp_path: Path):
+    """A dot segment below the skill folder still hides what is under it, so the fix
+    above does not turn the filter off: the name relative to the skill folder is the
+    only thing that decides, wherever the dot sits."""
+    folder = tmp_path / "expense-report"
+    folder.mkdir()
+    (folder / "SKILL.md").write_text(APPLE_STYLE)
+    (folder / "scripts" / ".draft").mkdir(parents=True)
+    (folder / "scripts" / ".draft" / "gen.py").write_text("print(2)")
+    (folder / "scripts" / "sub").mkdir()
+    (folder / "scripts" / "sub" / "ok.py").write_text("print(3)")
+    s = load_skill(folder)
+    assert s.files == [Path("scripts/sub/ok.py")]
+
+
+def test_shared_skill_creator_copies_are_current() -> None:
+    root = Path(__file__).resolve().parents[1]
+    source = (BUILTIN_DIR / "skill-creator" / "SKILL.md").read_text(encoding="utf-8")
+    for relative in (
+        "harness/dsh-nanomuse/assets/skill-creator.md",
+        "android/src/android/app/src/main/assets/nanomuse/skill-creator.md",
+    ):
+        assert (root / relative).read_text(encoding="utf-8") == source
+
+
 def test_builtin_skills_are_well_formed():
     lib = SkillLibrary(SkillsSettings(), own_dir=Path("/nonexistent/skills"))
     names = [s.name for s in lib.all()]
     assert names == sorted(names) and len(names) >= 5
     assert {
+        "skill-creator",
         "weekly-review",
         "trip-plan",
         "inbox-triage",
@@ -315,7 +363,7 @@ async def test_skills_tool(tmp_path: Path):
     assert b.warnings == ["this replaces one of the built-in skills"]
     assert tool.assess({"action": "remove", "name": "x"}).risk == RiskLevel.SENSITIVE
     r = await tool.execute(action="list")
-    assert r.ok and r.output.startswith("11 skills:\n- amap (built-in)")
+    assert r.ok and r.output.startswith("12 skills:\n- amap (built-in)")
     r = await tool.execute(action="use", name="trip-plan")
     assert r.ok and r.output.startswith("# Skill: trip-plan\n") and "## Research" in r.output
     r = await tool.execute(action="use", name="nope")

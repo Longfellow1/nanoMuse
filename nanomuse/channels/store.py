@@ -26,6 +26,7 @@ from typing import Any
 
 from nanomuse.channels.base import Channel, Field
 from nanomuse.logger import logger
+from nanomuse.private import keep_private
 from nanomuse.vault.vault import CredentialVault
 
 GROUP_POLICIES = ("mention", "open")
@@ -59,8 +60,8 @@ def _write_json(path: Path, data: dict[str, Any]) -> None:
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), "utf-8")
     try:
-        tmp.chmod(0o600)
-    except OSError:  # pragma: no cover - windows
+        keep_private(tmp)
+    except OSError:  # pragma: no cover
         pass
     tmp.replace(path)
 
@@ -130,16 +131,16 @@ class ChannelSettingsStore:
     # ------------------------------------------------------------------ reading
     def _from_toml(self) -> dict[str, Any]:
         """``[channels.<name>]`` tables of config.toml, ``${VAR}`` expanded like the rest."""
+        from nanomuse.config import _expand_env, read_toml
+
         path = Path(self.config_file) if self.config_file else None
         if path is None or not path.is_file():
             return {}
         try:
-            with path.open("rb") as fh:
-                raw = tomllib.load(fh)
-        except (OSError, tomllib.TOMLDecodeError) as exc:
+            raw = read_toml(path)
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
             logger.warning("channels: could not read {}: {}", path, exc)
             return {}
-        from nanomuse.config import _expand_env
 
         table = raw.get("channels")
         if not isinstance(table, dict):

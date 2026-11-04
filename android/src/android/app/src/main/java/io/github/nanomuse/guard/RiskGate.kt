@@ -1,6 +1,7 @@
 package io.github.nanomuse.guard
 
 import com.openminis.app.logging.AppLogger
+import io.github.nanomuse.cloud.ClientEvents
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -13,6 +14,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.resume
@@ -29,6 +31,10 @@ data class RiskRequest(
     val pageUrl: String? = null,
     /** For browser requests: the element's own text. */
     val elementText: String? = null,
+    /** For a computer's scheduled task: the app the step acts in there. */
+    val app: String? = null,
+    /** How long the card waits before silence counts as no. */
+    val timeoutMs: Long = RiskGate.TIMEOUT_MS,
     val createdAt: Long = System.currentTimeMillis(),
 ) {
     /**
@@ -38,7 +44,7 @@ data class RiskRequest(
      * confirms with the phone's screen lock ([needsCredential]), and the first time is always
      * asked because the grant can only come from the card.
      */
-    val canSession: Boolean get() = assessment.warnings.isEmpty() && assessment.riskClass != RiskClass.MONEY && kind != GuardKind.DEVICE
+    val canSession: Boolean get() = assessment.warnings.isEmpty() && assessment.riskClass != RiskClass.MONEY && kind != GuardKind.DEVICE && kind != GuardKind.SCHEDULED
     val canAlways: Boolean get() = assessment.warnings.isEmpty() && !assessment.target.isNullOrBlank()
     val canRemember: Boolean get() = canSession || canAlways
     val needsCredential: Boolean get() = assessment.riskClass == RiskClass.MONEY
@@ -85,6 +91,11 @@ object RiskGate {
     private val _recent = MutableStateFlow<List<Pair<RiskRequest, RiskDecision>>>(emptyList())
     val recent: StateFlow<List<Pair<RiskRequest, RiskDecision>>> = _recent.asStateFlow()
 
+    const val BY_PERSON = "person"
+    const val BY_OTHER_DEVICE = "other_device"
+    /** Who answered each request, read once by [check] when the answer comes back. */
+    private val answeredBy = ConcurrentHashMap<String, String>()
+
     /**
      * Waits for the person's answer. Cancelling the caller (the chat was stopped, the session
      * closed) withdraws the request: the card goes away and the next one in line comes up,
@@ -102,7 +113,7 @@ object RiskGate {
                 if (!cont.isActive) return@withLock
                 awaiters[request.id] = cont
                 timeouts[request.id] = scope.launch {
-                    delay(TIMEOUT_MS)
+                    delay(request.timeoutMs)
                     resolve(request.id, RiskDecision.TIMEOUT)
                 }
                 if (_pending.value == null) {
@@ -116,8 +127,15 @@ object RiskGate {
         }
     }
 
-    fun decide(id: String, decision: RiskDecision) {
+    /** [by] is who answered, for the record: `person` (the card, the notification, the capsule) or `other_device` (the hub). */
+    fun decide(id: String, decision: RiskDecision, by: String = BY_PERSON) {
+        answeredBy[id] = by
         scope.launch { resolve(id, decision) }
+    }
+
+    /** The question went away where it was asked (answered on the computer): the card leaves without a decision. */
+    fun withdraw(id: String) {
+        scope.launch { resolve(id, RiskDecision.DENY, record = false) }
     }
 
     fun notifyPending() {
@@ -185,13 +203,24 @@ object RiskGate {
         pageUrl: String? = null,
         elementText: String? = null,
     ): GateOutcome {
+        // what the record hears of this (ClientEvents, docs/cloud.md "Client events"): the tool's
+        // kind, the risk's tier and the phone's own class, never the command or the page
+        val about = mapOf(
+            "tool" to kind.name.lowercase(),
+            "risk" to riskWord(assessment.riskClass),
+            "class" to assessment.riskClass.name.lowercase(),
+            "warnings" to assessment.warnings.size.takeIf { it > 0 },
+        )
         if (!assessment.needsApproval) {
+            ClientEvents.sentinelDecision(sessionId, about + mapOf("decision" to "allow", "policy" to "allow", "by" to "policy"))
             return GateOutcome.Allowed(
                 if (assessment.riskClass == RiskClass.INSTALL) INSTALL_NOTICE else null,
             )
         }
         if (assessment.warnings.isEmpty() && Grants.allows(assessment.riskClass, assessment.target, sessionId)) {
             AppLogger.info(TAG, "covered by a grant: ${Grants.key(assessment.riskClass, assessment.target)}")
+            val grant = if (Grants.allows(assessment.riskClass, assessment.target, null)) "always" else "conversation"
+            ClientEvents.sentinelDecision(sessionId, about + mapOf("decision" to "allow", "policy" to "ask", "grant" to grant, "by" to "grant"))
             // A payment that ran on a standing grant is said out loud every time; the person
             // chose that, and the line is how they keep track of it.
             return GateOutcome.Allowed(
@@ -206,7 +235,18 @@ object RiskGate {
             pageUrl = pageUrl,
             elementText = elementText,
         )
-        return when (ask(request)) {
+        ClientEvents.sentinelDecision(sessionId, about + mapOf("decision" to "ask", "policy" to "ask"))
+        val decision = ask(request)
+        ClientEvents.approvalResult(
+            sessionId,
+            about + mapOf(
+                "allow" to (decision != RiskDecision.DENY && decision != RiskDecision.TIMEOUT),
+                "scope" to scopeWord(decision, request),
+                "by" to if (decision == RiskDecision.TIMEOUT) "timeout" else answeredBy.remove(request.id) ?: BY_PERSON,
+                "waited_s" to (System.currentTimeMillis() - request.createdAt) / 1000,
+            ),
+        )
+        return when (decision) {
             RiskDecision.ALLOW_ONCE -> GateOutcome.Allowed()
             RiskDecision.ALLOW_SESSION -> {
                 if (request.canSession) Grants.grantSession(assessment.riskClass, sessionId, assessment.reason, assessment.target)
@@ -227,6 +267,21 @@ object RiskGate {
                     "Stop here and wait for them; do not retry on your own.",
             )
         }
+    }
+
+    /** The risk's tier in the relay's words (`safe`, `moderate`, `sensitive`, `critical`). */
+    fun riskWord(riskClass: RiskClass): String = when (riskClass.tier) {
+        RiskTier.NOTICE -> if (riskClass == RiskClass.SAFE) "safe" else "moderate"
+        RiskTier.CONFIRM -> "sensitive"
+        RiskTier.HIGHEST -> "critical"
+    }
+
+    /** The permission an answer gave, in the relay's words, or null when it gave none. */
+    fun scopeWord(decision: RiskDecision, request: RiskRequest): String? = when (decision) {
+        RiskDecision.ALLOW_ONCE -> "once"
+        RiskDecision.ALLOW_SESSION -> if (request.canSession) "conversation" else "once"
+        RiskDecision.ALLOW_ALWAYS -> if (request.canAlways) "always" else "once"
+        RiskDecision.DENY, RiskDecision.TIMEOUT -> null
     }
 
     const val INSTALL_NOTICE =

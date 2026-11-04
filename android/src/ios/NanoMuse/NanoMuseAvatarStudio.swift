@@ -4,8 +4,8 @@
 //
 //  Describe a face → four candidates → pick one → the moods are posed
 //  from it → saved on this phone and in the account's profile. Pictures
-//  are drawn with a Bailian key on this phone when there is one, otherwise
-//  through nanoMuse Cloud with a cost estimate first (NanoMuseImageGen).
+//  are drawn with a provider key on this phone, or through a self-hosted
+//  relay that explicitly advertises an image model (NanoMuseImageGen).
 //  The chat-driven flow (NanoMuseAvatarFlow) drives this same model.
 //  Android: avatar/AvatarStudio.kt, ui/avatar/AvatarStudioScreen.kt.
 //
@@ -43,6 +43,23 @@ enum NanoMuseAvatarStyle: String, CaseIterable, Identifiable {
         case .sticker: return "glossy sticker style, thick white outline, bold saturated colours"
         }
     }
+}
+
+private struct NanoMuseAvatarPreset: Identifiable {
+    let id: String
+    let nameKey: String.LocalizationValue
+    let descriptionKey: String.LocalizationValue
+    let style: NanoMuseAvatarStyle
+
+    var name: String { AppLocalized(nameKey) }
+    var description: String { AppLocalized(descriptionKey) }
+
+    static let all = [
+        NanoMuseAvatarPreset(id: "moss-courier", nameKey: "Moss Courier", descriptionKey: "a tiny moss-covered courier with leaf ears and an unmarked canvas satchel", style: .muse),
+        NanoMuseAvatarPreset(id: "tide-tinker", nameKey: "Tide Tinker", descriptionKey: "a seafoam axolotl tinkerer with coral frills and a plain tool pouch", style: .clay),
+        NanoMuseAvatarPreset(id: "dusk-moth", nameKey: "Dusk Moth", descriptionKey: "a thoughtful indigo moth with peach wing spots, a cream collar and round glasses", style: .watercolor),
+        NanoMuseAvatarPreset(id: "copper-acorn", nameKey: "Copper Acorn", descriptionKey: "a small acorn-shaped copper automaton with sage panels and a muted-blue scarf", style: .line),
+    ]
 }
 
 enum NanoMuseAvatarPrompts {
@@ -158,13 +175,15 @@ final class NanoMuseAvatarStudioModel: ObservableObject {
             : String(format: AppLocalized("A new face is %d pictures"), picturesPerFace)
     }
 
-    /// A Bailian key on this phone draws the face; nanoMuse Cloud otherwise.
+    /// Whether a Bailian key on this phone draws the face.
     var usesOwnKey: Bool { NanoMuseImageGen.usesOwnKey }
 
     /// Whether a picture can be drawn at all right now; the reason when not.
     var cannotDrawReason: String? {
-        if usesOwnKey || NanoMuseCloud.modelsOn { return nil }
-        return AppLocalized("Sign in to nanoMuse Cloud, or add an Alibaba Cloud Bailian key under Providers; the pictures are drawn with one of the two.")
+        if case .unavailable = NanoMuseImageGen.route() {
+            return AppLocalized("No image model found on this provider. Type one below, or check again once the key is in.")
+        }
+        return nil
     }
 
     /// Files of the candidates on screen, in order ("" where one failed).
@@ -200,7 +219,7 @@ final class NanoMuseAvatarStudioModel: ObservableObject {
     // MARK: Cost
 
     func refreshEstimate() {
-        guard NanoMuseCloud.modelsOn, !usesOwnKey else { return }
+        guard case .relay = NanoMuseImageGen.route() else { return }
         estimating = true
         estimateError = nil
         Task { @MainActor [self] in
@@ -369,6 +388,17 @@ struct NanoMuseAvatarStudioView: View {
     @State private var askCost = false
     @State private var confirmReset = false
 
+    private var sourceNote: String {
+        switch NanoMuseImageGen.route() {
+        case .ownKey:
+            return AppLocalized("Pictures are drawn with your Bailian key and kept on this phone; the face is shared with your other devices through your account. Each new face is eight pictures: four to choose from and four moods.")
+        case .relay:
+            return AppLocalized("Pictures are drawn through nanoMuse Cloud and kept on this phone; the face is shared with your other devices through your account. Each new face is eight pictures: four to choose from and four moods.")
+        case .unavailable:
+            return AppLocalized("Until one is set, the avatar cannot be changed and no pictures can be drawn. The agent will say so if you ask.")
+        }
+    }
+
     var body: some View {
         if embedded {
             content
@@ -420,9 +450,7 @@ struct NanoMuseAvatarStudioView: View {
                     }
                 }
                 Section {
-                    Text(studio.usesOwnKey
-                         ? AppLocalized("Pictures are drawn with your Bailian key and kept on this phone; the face is shared with your other devices through your account. Each new face is eight pictures: four to choose from and four moods.")
-                         : AppLocalized("Pictures are drawn through nanoMuse Cloud and kept on this phone; the face is shared with your other devices through your account. Each new face is eight pictures: four to choose from and four moods."))
+                    Text(sourceNote)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                     Text(NanoMuseImageGen.providerLine())
@@ -547,6 +575,42 @@ struct NanoMuseAvatarStudioView: View {
 
     private var describeSection: some View {
         Section {
+            Text(AppLocalized("AI-generated inspiration"))
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(NanoMuseAvatarPreset.all) { preset in
+                        Button {
+                            studio.description = preset.description
+                            studio.style = preset.style
+                        } label: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                if let image = UIImage(named: "preset-\(preset.id)") {
+                                    Image(uiImage: image)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 112, height: 112)
+                                        .clipShape(RoundedRectangle(cornerRadius: 18))
+                                        .overlay {
+                                            if studio.description == preset.description {
+                                                RoundedRectangle(cornerRadius: 18)
+                                                    .stroke(NanoMuseTones.action, lineWidth: 3)
+                                            }
+                                        }
+                                }
+                                Text(preset.name).font(.caption.weight(.semibold)).lineLimit(1)
+                                Text(preset.style.label).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                            .frame(width: 112, alignment: .leading)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("\(preset.name), \(preset.style.label)")
+                    }
+                }
+                .padding(.vertical, 2)
+            }
             TextField(AppLocalized("Describe a new face"), text: $studio.description, axis: .vertical)
                 .lineLimit(2...5)
             ScrollView(.horizontal, showsIndicators: false) {

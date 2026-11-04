@@ -2,6 +2,7 @@ package io.github.nanomuse.media
 
 import android.graphics.Bitmap
 import com.openminis.app.data.model.ProviderInstance
+import com.openminis.app.data.model.normalizeModalities
 import com.openminis.app.logging.AppLogger
 import io.github.nanomuse.avatar.ImageGen
 import kotlinx.coroutines.Dispatchers
@@ -27,9 +28,11 @@ import java.util.concurrent.TimeUnit
  * A first frame is uploaded to Model Studio's free 48-hour temporary storage first
  * (`/api/v1/uploads`), because the video API takes URLs, not inline data.
  *
- * The two families take different bodies: MiniMax wants `media[first_frame]`, `resolution`,
- * `ratio` and `duration`; Wan wants `img_url`, `resolution`/`size` and — on wan2.6 and 2.5 — a
- * `duration`. Wan also splits text-to-video and image-to-video into sibling models
+ * The families take different bodies: MiniMax wants `media[first_frame]`, `resolution`,
+ * `ratio` and `duration`; Wan up to 2.6 wants `img_url`, `resolution`/`size` and — on wan2.6 and
+ * 2.5 — a `duration`; Wan 2.7 speaks Model Studio's newer protocol, `media[first_frame]` with
+ * `resolution` for a picture and `resolution` with `ratio` for words, `duration` 2–15 on both.
+ * Wan also splits text-to-video and image-to-video into sibling models
  * (`wan2.6-t2v` / `wan2.6-i2v`); whichever the user picked, the sibling is used for the other job.
  *
  * Costs are the user's: billing is per output second, so callers keep [imageToVideo]'s
@@ -70,6 +73,7 @@ object VideoGen {
      */
     val KNOWN_DASHSCOPE_MODELS = listOf(
         "wan2.2-i2v-flash",
+        "wan2.7-i2v", "wan2.7-t2v",
         "MiniMax/MiniMax-H3",
         "wan2.6-i2v", "wan2.6-t2v",
         "wan2.5-i2v-preview", "wan2.5-t2v-preview",
@@ -81,6 +85,16 @@ object VideoGen {
         val s = id.lowercase()
         return listOf("t2v", "i2v", "video", "minimax-h", "hailuo", "kling", "veo", "seedance", "sora").any { s.contains(it) }
     }
+
+    /**
+     * Whether a model entry makes video: the entry says so (`video` among its output
+     * modalities — a hand-added entry can be marked that way in its details, whatever its
+     * name) or the name does ([looksLikeVideoModel]). Model Studio's `/models` list carries
+     * no modalities and no video models at all, so for what a provider lists the name is the
+     * only clue.
+     */
+    fun isVideoEntry(id: String, outputModalities: List<String>?): Boolean =
+        "video" in outputModalities.normalizeModalities().orEmpty() || looksLikeVideoModel(id)
 
     /**
      * Whether [model] exists for this key, without making a video: an empty task is submitted
@@ -117,12 +131,18 @@ object VideoGen {
 
     private fun isWan(model: String) = model.startsWith("wan", ignoreCase = true)
 
+    /** Wan 2.7 (`wan2.7-i2v`, `wan2.7-t2v`, their dated snapshots): the newer protocol. */
+    internal fun isWan27(model: String) = model.startsWith("wan2.7", ignoreCase = true)
+
     /**
      * The Wan sibling for the job: `…-i2v…` when starting from a picture, `…-t2v…` from words.
-     * Wan 2.2 has no text-to-video Flash: its Plus is the sibling there.
+     * Wan 2.2 has no text-to-video Flash: its Plus is the sibling there. Wan 2.7's dated snapshots
+     * differ between the two (`wan2.7-t2v-2026-06-12`, `wan2.7-i2v-2026-04-25`), so the sibling
+     * there is the undated id, which Model Studio keeps current.
      */
     internal fun modelFor(model: String, fromImage: Boolean): String = when {
         !isWan(model) -> model
+        isWan27(model) -> (if (fromImage) "i2v" else "t2v").let { kind -> if (model.contains(kind, ignoreCase = true)) model else "wan2.7-$kind" }
         fromImage -> model.replace("t2v", "i2v")
         model.startsWith("wan2.2") -> "wan2.2-t2v-plus"
         else -> model.replace("i2v", "t2v")
@@ -159,18 +179,7 @@ object VideoGen {
         val model = modelFor(ep.model, fromImage = true)
         val png = pngBytes(fitFrame(image))
         val ossUrl = uploadTemp(ep.copy(model = model), png, "first-frame.png", "image/png")
-        val input = JSONObject().put("prompt", prompt)
-        val parameters = JSONObject().put("watermark", false)
-        if (isWan(model)) {
-            input.put("img_url", ossUrl)
-            parameters.put("resolution", wanResolution(model))
-        } else {
-            input.put("media", JSONArray().put(JSONObject().put("type", "first_frame").put("url", ossUrl)))
-            parameters.put("resolution", "768P")
-        }
-        durationFor(model, seconds)?.let { parameters.put("duration", it) }
-        val body = JSONObject().put("model", model).put("input", input).put("parameters", parameters)
-        val task = createTask(ep, body, ossInput = true)
+        val task = createTask(ep, imageToVideoBody(model, ossUrl, prompt, seconds), ossInput = true)
         onProgress(Progress.Submitted)
         val url = poll(ep, task, onProgress)
         onProgress(Progress.Downloading)
@@ -186,16 +195,45 @@ object VideoGen {
         onProgress: (Progress) -> Unit = {},
     ): ByteArray = withContext(Dispatchers.IO) {
         val model = modelFor(ep.model, fromImage = false)
-        val parameters = JSONObject().put("watermark", false)
-        if (isWan(model)) parameters.put("size", wanSize(ratio))
-        else parameters.put("resolution", "768P").put("ratio", ratio)
-        durationFor(model, seconds)?.let { parameters.put("duration", it) }
-        val body = JSONObject().put("model", model).put("input", JSONObject().put("prompt", prompt)).put("parameters", parameters)
-        val task = createTask(ep, body, ossInput = false)
+        val task = createTask(ep, textToVideoBody(model, prompt, seconds, ratio), ossInput = false)
         onProgress(Progress.Submitted)
         val url = poll(ep, task, onProgress)
         onProgress(Progress.Downloading)
         download(url)
+    }
+
+    /** The body of an image-to-video task, as the families want it; [model] is already the sibling for the job. */
+    internal fun imageToVideoBody(model: String, ossUrl: String, prompt: String, seconds: Int): JSONObject {
+        val input = JSONObject().put("prompt", prompt)
+        val parameters = JSONObject().put("watermark", false)
+        when {
+            isWan27(model) -> {
+                input.put("media", JSONArray().put(JSONObject().put("type", "first_frame").put("url", ossUrl)))
+                parameters.put("resolution", "720P")
+            }
+            isWan(model) -> {
+                input.put("img_url", ossUrl)
+                parameters.put("resolution", wanResolution(model))
+            }
+            else -> {
+                input.put("media", JSONArray().put(JSONObject().put("type", "first_frame").put("url", ossUrl)))
+                parameters.put("resolution", "768P")
+            }
+        }
+        durationFor(model, seconds)?.let { parameters.put("duration", it) }
+        return JSONObject().put("model", model).put("input", input).put("parameters", parameters)
+    }
+
+    /** The body of a text-to-video task. Wan 2.7 has 16:9, 9:16, 1:1, 4:3 and 3:4, so 21:9 becomes 16:9 there. */
+    internal fun textToVideoBody(model: String, prompt: String, seconds: Int, ratio: String): JSONObject {
+        val parameters = JSONObject().put("watermark", false)
+        when {
+            isWan27(model) -> parameters.put("resolution", "720P").put("ratio", if (ratio == "21:9") "16:9" else ratio)
+            isWan(model) -> parameters.put("size", wanSize(ratio))
+            else -> parameters.put("resolution", "768P").put("ratio", ratio)
+        }
+        durationFor(model, seconds)?.let { parameters.put("duration", it) }
+        return JSONObject().put("model", model).put("input", JSONObject().put("prompt", prompt)).put("parameters", parameters)
     }
 
     /** Wan text-to-video takes a pixel size instead of a ratio; 720p-class frames for each ratio. */
