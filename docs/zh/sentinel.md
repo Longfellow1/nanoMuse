@@ -91,6 +91,8 @@ sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
 | 24 小时 | 带过期时间保存到 `<data_dir>/approvals.json` |
 | 总是允许 | 持久保留，直到你撤销 |
 
+工作区中写入的文件回读时如果不存在，智能体会用相同的路径和内容重新写入，最多两次，并告诉你；其他操作不会这样重复。
+
 每项授权都对应明确的**授权键**，由工具和目标共同组成，例如 `web_fetch:example.com`、`send_email:alice@example.com`、`shell:git`、`browser:booking.com`。本次会话允许 `git` 不代表允许 `curl`；`git status | head` 这样的管道中，每个程序都需要授权，批准时会分别授予；邮件发给两人时，也要覆盖两个收件人。
 
 `shell` 的「本次对话都允许」是特例。因为任务使用 `git` 后通常还会调用 `ls`、`wc` 等程序，这个选项会覆盖当前对话剩余时间内的整个 shell 工具。但收件人、主机等目的地仍按目标限定。没有明确目标的工具，例如 `python_execute` 和 MCP 工具，则按整个工具授权。对于可联网的任意代码，哨兵只提供「允许一次」和「本次对话都允许」。带警告的调用，例如 `rm -rf`、`sudo`、`curl | sh`，必须逐次审批，长期授权不能覆盖。
