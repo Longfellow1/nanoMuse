@@ -7,7 +7,8 @@ independent observations of the resulting state and answer.
 ## Offline replay
 
 CI runs `pytest -q -m "not live"`. The task tests replay recorded model responses with
-network connections denied. The recording came from `deepseek-flash` on 2026-11-01.
+network connections denied. The recording came from `deepseek-flash` on 2026-11-01; P2 was
+recorded again on 2026-11-09, after the agent learned to write a missing file again.
 It contains responses and reported usage, not model inputs or reasoning. A changed agent
 loop can require a new recording, since the number of responses must match exactly.
 
